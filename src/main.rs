@@ -1,5 +1,5 @@
-use anyhow::{Context, Result};
-use camino::Utf8PathBuf;
+use anyhow::{anyhow, Context, Result};
+use camino::{Utf8Path, Utf8PathBuf};
 use cargo_metadata::{CargoOpt::AllFeatures, MetadataCommand};
 use clap::Parser;
 use std::collections::{BTreeMap, HashSet};
@@ -47,9 +47,21 @@ struct Args {
     path: Utf8PathBuf,
 }
 
+#[derive(Default)]
 struct MetadataArgs {
     linux_only: bool,
     all_features: bool,
+    no_dependencies: bool,
+    manifest_path: Utf8PathBuf,
+}
+
+impl MetadataArgs {
+    fn new(path: impl AsRef<Utf8Path>) -> Self {
+        Self {
+            manifest_path: path.as_ref().to_owned(),
+            ..Default::default()
+        }
+    }
 }
 
 impl From<&Args> for MetadataArgs {
@@ -57,6 +69,8 @@ impl From<&Args> for MetadataArgs {
         Self {
             linux_only: args.linux_only,
             all_features: args.all_features,
+            manifest_path: Utf8PathBuf::from("Cargo.toml"),
+            ..Default::default()
         }
     }
 }
@@ -64,8 +78,12 @@ impl From<&Args> for MetadataArgs {
 // This code derived from https://github.com/rust-secure-code/cargo-supply-chain/blob/master/src/common.rs
 fn metadata_command(args: MetadataArgs) -> MetadataCommand {
     let mut command = MetadataCommand::new();
+    command.manifest_path(args.manifest_path);
     if args.all_features {
         command.features(AllFeatures);
+    }
+    if args.no_dependencies {
+        command.no_deps();
     }
     // TODO: verify by cross checking all tier1 platforms that the dependency set is exactly
     // the same.
@@ -75,6 +93,37 @@ fn metadata_command(args: MetadataArgs) -> MetadataCommand {
         .into_iter();
     command.other_options(args.collect::<Vec<_>>());
     command
+}
+
+fn replace_with_stub(path: &Utf8Path) -> Result<()> {
+    let mut args = MetadataArgs::new(path.join("Cargo.toml"));
+    args.no_dependencies = true;
+    let command = metadata_command(args);
+    let meta = command
+        .exec()
+        .map_err(anyhow::Error::msg)
+        .context("Executing cargo metadata")?;
+    let root = meta
+        .packages
+        .get(0)
+        .ok_or_else(|| anyhow!("Failed to find root package in {path}"))?;
+    let name = &root.name;
+    let version = &root.version;
+    let edition = &root.edition;
+    std::fs::remove_dir_all(path)?;
+    std::fs::create_dir_all(path.join("src"))?;
+    std::fs::write(
+        path.join("Cargo.toml"),
+        format!(
+            r##"[package]
+name = "{name}"
+edition = "{edition}"
+version = "{version}"
+"##
+        ),
+    )?;
+    std::fs::write(path.join("src/lib.rs"), "")?;
+    Ok(())
 }
 
 fn run() -> Result<()> {
@@ -157,27 +206,30 @@ fn run() -> Result<()> {
         pbuf.push(name);
 
         if !package_filenames.contains_key(name) {
-            println!("Removing unreferenced package: {name}");
-            std::fs::remove_dir_all(&pbuf)?;
+            replace_with_stub(&pbuf).with_context(|| format!("Replacing with stub: {name}"))?;
+            println!("Replacing unreferenced package with stub: {name}");
             assert!(unreferenced.insert(name.to_string()));
         }
 
         debug_assert!(pbuf.pop());
     }
 
-    // Remove the dependency information for deleted packages
-    for entry in args.path.read_dir_utf8()? {
-        let entry = entry?;
-        let name = entry.file_name();
-        pbuf.push(name);
-        pbuf.push("Cargo.lock");
+    // // Remove the dependency information for deleted packages
+    // for entry in args.path.read_dir_utf8()? {
+    //     let entry = entry?;
+    //     let name = entry.file_name();
+    //     pbuf.push(name);
+    //     pbuf.push("Cargo.lock");
+    //     let lockf_path = &pbuf;
 
-        let lockf =
-            cargo_lock::Lockfile::load(&pbuf).with_context(|| format!("Failed to load {pbuf}"))?;
+    //     if lockf_path.exists() {
+    //         let lockf = cargo_lock::Lockfile::load(&pbuf)
+    //             .with_context(|| format!("Failed to load {pbuf}"))?;
+    //     }
 
-        debug_assert!(pbuf.pop());
-        debug_assert!(pbuf.pop());
-    }
+    //     debug_assert!(pbuf.pop());
+    //     debug_assert!(pbuf.pop());
+    // }
 
     Ok(())
 }
