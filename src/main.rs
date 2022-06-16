@@ -277,23 +277,6 @@ fn run() -> Result<()> {
         debug_assert!(pbuf.pop());
     }
 
-    // // Remove the dependency information for deleted packages
-    // for entry in args.path.read_dir_utf8()? {
-    //     let entry = entry?;
-    //     let name = entry.file_name();
-    //     pbuf.push(name);
-    //     pbuf.push("Cargo.lock");
-    //     let lockf_path = &pbuf;
-
-    //     if lockf_path.exists() {
-    //         let lockf = cargo_lock::Lockfile::load(&pbuf)
-    //             .with_context(|| format!("Failed to load {pbuf}"))?;
-    //     }
-
-    //     debug_assert!(pbuf.pop());
-    //     debug_assert!(pbuf.pop());
-    // }
-
     Ok(())
 }
 
