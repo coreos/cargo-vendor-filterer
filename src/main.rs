@@ -2,8 +2,16 @@ use anyhow::{anyhow, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use cargo_metadata::{CargoOpt::AllFeatures, MetadataCommand};
 use clap::Parser;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
+use std::io::{BufReader, Write};
 use std::process::Command;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct CargoChecksums {
+    files: BTreeMap<String, String>,
+    package: String,
+}
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum OutputTarget {
@@ -110,11 +118,32 @@ fn replace_with_stub(path: &Utf8Path) -> Result<()> {
     let name = &root.name;
     let version = &root.version;
     let edition = &root.edition;
+    let checksums_path = path.join(".cargo-checksum.json");
+    let checksums = std::fs::File::open(&checksums_path).map(BufReader::new)?;
+    let mut checksums: CargoChecksums =
+        serde_json::from_reader(checksums).with_context(|| format!("Parsing {checksums_path}"))?;
+
+    // Clear out everything and replace it with a fresh directory with a new `src/`
+    // subdir.
     std::fs::remove_dir_all(path)?;
     std::fs::create_dir_all(path.join("src"))?;
-    std::fs::write(
-        path.join("Cargo.toml"),
-        format!(
+    // Also empty out the file checksums, but keep the overall package checksum.
+    checksums.files.clear();
+
+    // Helper to both write a file and compute its sha256, storing it in the
+    // cargo checksum list.
+    let mut writef = |path: &Utf8Path, contents: &str| {
+        std::fs::write(path, contents)?;
+        let digest =
+            openssl::hash::hash(openssl::hash::MessageDigest::sha256(), contents.as_bytes())?;
+        let digest = hex::encode(digest);
+        checksums.files.insert(path.to_string(), digest);
+        Ok::<_, anyhow::Error>(())
+    };
+    // An empty Cargo.toml
+    writef(
+        &path.join("Cargo.toml"),
+        &format!(
             r##"[package]
 name = "{name}"
 edition = "{edition}"
@@ -122,7 +151,12 @@ version = "{version}"
 "##
         ),
     )?;
-    std::fs::write(path.join("src/lib.rs"), "")?;
+    // And an empty source file
+    writef(&path.join("src/lib.rs"), "")?;
+    // Finally, serialize the new checksums
+    let mut w = std::fs::File::create(checksums_path).map(std::io::BufWriter::new)?;
+    serde_json::to_writer(&mut w, &checksums)?;
+    w.flush()?;
     Ok(())
 }
 
