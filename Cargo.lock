@@ -62,6 +62,7 @@ dependencies = [
  "openssl",
  "serde",
  "serde_json",
+ "toml",
 ]
 
 [[package]]

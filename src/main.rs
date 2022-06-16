@@ -13,10 +13,29 @@ struct CargoChecksums {
     package: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct CargoManifest {
+    package: CargoPackage,
+    features: BTreeMap<String, Vec<String>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct CargoPackage {
+    name: String,
+    version: String,
+    edition: String,
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum OutputTarget {
     Dir,
     //    Tar,
+}
+
+impl Default for OutputTarget {
+    fn default() -> Self {
+        Self::Dir
+    }
 }
 
 impl clap::ValueEnum for OutputTarget {
@@ -47,7 +66,7 @@ struct Args {
     #[clap(long)]
     all_features: bool,
 
-    #[clap(long, value_parser)]
+    #[clap(long, value_parser, default_value = "dir")]
     format: OutputTarget,
 
     /// The output path
@@ -140,17 +159,22 @@ fn replace_with_stub(path: &Utf8Path) -> Result<()> {
         checksums.files.insert(path.to_string(), digest);
         Ok::<_, anyhow::Error>(())
     };
+    let features = root
+        .features
+        .iter()
+        .map(|(k, _)| (k.clone(), Vec::new()))
+        .collect();
+    let new_manifest = CargoManifest {
+        package: CargoPackage {
+            name: name.to_string(),
+            edition: edition.to_string(),
+            version: version.to_string(),
+        },
+        features,
+    };
+    let new_manifest = toml::to_string(&new_manifest)?;
     // An empty Cargo.toml
-    writef(
-        &path.join("Cargo.toml"),
-        &format!(
-            r##"[package]
-name = "{name}"
-edition = "{edition}"
-version = "{version}"
-"##
-        ),
-    )?;
+    writef(&path.join("Cargo.toml"), &new_manifest)?;
     // And an empty source file
     writef(&path.join("src/lib.rs"), "")?;
     // Finally, serialize the new checksums
@@ -218,13 +242,18 @@ fn run() -> Result<()> {
         package_filenames.insert(name.to_string(), pkg);
     }
 
+    // When writing out packages that have multiple versions, `cargo vendor`
+    // appears to use an algorithm where the first (or highest version?)
+    // is just $name, then all other versions end up as $name-$version.
+    // We build up a map of those here to their original package.
     for (namever, pkg) in multiversioned_packages {
+        let name = &pkg.name;
         let namever_path = args.path.join(&namever);
-        let name_path = args.path.join(&pkg.name);
-        if name_path.exists() {
-            package_filenames.insert(pkg.name.to_string(), pkg);
-        } else if namever_path.exists() {
+        let name_path = args.path.join(name);
+        if namever_path.exists() {
             package_filenames.insert(namever, pkg);
+        } else if name_path.exists() {
+            package_filenames.insert(pkg.name.to_string(), pkg);
         } else {
             anyhow::bail!("Failed to find vendored dependency: {namever}");
         }
