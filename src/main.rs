@@ -174,12 +174,23 @@ fn run() -> Result<()> {
 
     let mut pkgs_by_name = BTreeMap::<_, Vec<_>>::new();
     for pkg in packages {
+        let name = pkg.name.as_str();
+        // Skip ourself
         if let Some(rootid) = root {
             if &pkg.id == rootid {
                 continue;
             }
         }
-        let name = pkg.name.as_str();
+        // Also skip anything not from crates.io
+        if pkg
+            .source
+            .as_ref()
+            .filter(|source| source.is_crates_io())
+            .is_none()
+        {
+            println!("Skipping {name}");
+            continue;
+        }
 
         let v = pkgs_by_name.entry(name).or_default();
         let name_version = format!("{name}-{}", pkg.version);
