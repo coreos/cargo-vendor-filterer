@@ -35,3 +35,8 @@ jobs:
         run: cargo test --no-run
       - name: Run tests
         run: cargo test -- --nocapture --quiet
+      - name: Install
+        run: cargo install --path . --debug
+      - name: Self test integration
+        run: ./ci/selftest.sh
+
