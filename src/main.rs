@@ -85,15 +85,6 @@ struct MetadataArgs {
     manifest_path: Utf8PathBuf,
 }
 
-impl MetadataArgs {
-    fn new(path: impl AsRef<Utf8Path>) -> Self {
-        Self {
-            manifest_path: path.as_ref().to_owned(),
-            ..Default::default()
-        }
-    }
-}
-
 impl From<&Args> for MetadataArgs {
     fn from(args: &Args) -> Self {
         Self {
@@ -132,12 +123,11 @@ fn metadata_command(args: MetadataArgs) -> MetadataCommand {
 /// Entirely removing the crates would require editing the dependency graph,
 /// which gets into more work.
 fn replace_with_stub(path: &Utf8Path) -> Result<()> {
-    let mut args = MetadataArgs::new(path.join("Cargo.toml"));
-    args.no_dependencies = true;
-    let command = metadata_command(args);
+    let mut command = MetadataCommand::new();
+    command.manifest_path(path.join("Cargo.toml"));
+    command.no_deps();
     let meta = command
         .exec()
-        .map_err(anyhow::Error::msg)
         .context("Executing cargo metadata")?;
     let root = meta
         .packages
