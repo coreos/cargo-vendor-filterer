@@ -57,13 +57,11 @@ impl clap::ValueEnum for OutputTarget {
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
-    /// Only include crates for a Linux build
+    /// Only include crates for these targets.
+    ///
+    /// For example, `x86_64-unknown-linux-gnu`.
     #[clap(long)]
-    linux_only: bool,
-
-    /// Exclude the given crates
-    #[clap(long)]
-    exclude: Vec<String>,
+    platform: Vec<String>,
 
     /// Enable all features
     #[clap(long)]
@@ -165,10 +163,14 @@ fn run() -> Result<()> {
     }
     // TODO: verify by cross checking all tier1 platforms that the dependency set is exactly
     // the same.
-    let other_args = args
-        .linux_only
-        .then(|| String::from("--filter-platform=x86_64-unknown-linux-gnu"))
-        .into_iter();
+
+    let filter = match &args.platform.as_slice() {
+        [] => None,
+        [p] => Some(p),
+        _ => anyhow::bail!("Specifying multiple targets is not currently supported"),
+    };
+
+    let other_args = filter.map(|s| format!("--filter-platform={s}")).into_iter();
     command.other_options(other_args.collect::<Vec<_>>());
     let meta = command.exec().context("Executing cargo metadata")?;
     let packages = &meta.packages;
