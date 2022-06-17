@@ -203,7 +203,7 @@ fn run() -> Result<()> {
             .filter(|source| source.is_crates_io())
             .is_none()
         {
-            println!("Skipping {name}");
+            eprintln!("Skipping {name}");
             continue;
         }
 
@@ -263,7 +263,7 @@ fn run() -> Result<()> {
 
         if !package_filenames.contains_key(name) {
             replace_with_stub(&pbuf).with_context(|| format!("Replacing with stub: {name}"))?;
-            println!("Replacing unreferenced package with stub: {name}");
+            eprintln!("Replacing unreferenced package with stub: {name}");
             assert!(unreferenced.insert(name.to_string()));
         }
 
