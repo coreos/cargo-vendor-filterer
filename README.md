@@ -13,6 +13,15 @@ More information: https://github.com/rust-lang/cargo/issues/7058
 $ cargo vendor-filterer --platform=x86_64-unknown-linux-gnu
 ```
 
+You can also declaratively specify the desired vendor configuration via the [Cargo metadata](https://doc.rust-lang.org/cargo/reference/manifest.html#the-metadata-table)
+key `package.metadata.vendor-filter`:
+
+```
+[package.metadata.vendor-filter]
+platforms = ["x86_64-unknown-linux-gnu"]
+all-features = true
+```
+
 # TODO
 
 We only support a single `--platform` right now, so if e.g.

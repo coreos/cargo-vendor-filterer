@@ -7,6 +7,8 @@ use std::collections::{BTreeMap, HashSet};
 use std::io::{BufReader, Write};
 use std::process::Command;
 
+const CONFIG_KEY: &str = "vendor-filter";
+
 /// This is the .cargo-checksum.json in a crate/package.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct CargoChecksums {
@@ -53,6 +55,13 @@ impl clap::ValueEnum for OutputTarget {
     }
 }
 
+#[derive(PartialEq, Eq, Deserialize, Default, Debug)]
+#[serde(rename_all = "kebab-case")]
+struct VendorFilter {
+    platforms: Option<Vec<String>>,
+    all_features: Option<bool>,
+}
+
 /// Enhanced `cargo vendor` with filtering
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -61,11 +70,11 @@ struct Args {
     ///
     /// For example, `x86_64-unknown-linux-gnu`.
     #[clap(long)]
-    platform: Vec<String>,
+    platform: Option<Vec<String>>,
 
     /// Enable all features
     #[clap(long)]
-    all_features: bool,
+    all_features: Option<bool>,
 
     #[clap(long, value_parser, default_value = "dir")]
     format: OutputTarget,
@@ -80,7 +89,8 @@ struct Args {
 // So...forcibly hack in a dummy workspace value.
 fn inject_dummy_workspace(path: &Utf8Path) -> Result<()> {
     let cargo_path = path.join("Cargo.toml");
-    let cargo_toml = std::fs::read_to_string(&cargo_path)?;
+    let cargo_toml =
+        std::fs::read_to_string(&cargo_path).with_context(|| format!("Writing {path}"))?;
     let cargo_toml = cargo_toml.replace("[package]", "[workspace]\n[package]");
     std::fs::write(&cargo_path, cargo_toml)?;
     Ok(())
@@ -155,19 +165,63 @@ fn replace_with_stub(path: &Utf8Path) -> Result<()> {
     Ok(())
 }
 
+impl VendorFilter {
+    fn parse_json(meta: &serde_json::Value) -> Result<Option<Self>> {
+        let meta = meta.as_object().and_then(|o| o.get(CONFIG_KEY));
+        let meta = if let Some(m) = meta {
+            m
+        } else {
+            return Ok(None);
+        };
+        let v: Self = serde_json::from_value(meta.clone())?;
+        Ok(Some(v))
+    }
+
+    fn parse_args(args: &Args) -> Option<Self> {
+        let args_unset = args.platform.is_none() && args.all_features.is_none();
+        (!args_unset).then(|| Self {
+            platforms: args.platform.clone(),
+            all_features: args.all_features,
+        })
+    }
+}
+
+fn gather_config(args: &Args) -> Result<Option<VendorFilter>> {
+    // Accept config from arguments first
+    if let Some(f) = VendorFilter::parse_args(args) {
+        return Ok(Some(f));
+    };
+    let meta = MetadataCommand::new()
+        .exec()
+        .context("Executing cargo metadata (first run)")?;
+    meta.root_package()
+        .and_then(|r| VendorFilter::parse_json(&r.metadata).transpose())
+        .transpose()
+}
+
 fn run() -> Result<()> {
     let args = Args::parse();
+
+    let (had_config, config) = if let Some(c) = gather_config(&args)? {
+        (true, c)
+    } else {
+        (false, VendorFilter::default())
+    };
+    if !had_config {
+        eprintln!("Notice: No vendor filtering enabled");
+    }
+
     let mut command = MetadataCommand::new();
-    if args.all_features {
+    if config.all_features.unwrap_or_default() {
         command.features(AllFeatures);
     }
     // TODO: verify by cross checking all tier1 platforms that the dependency set is exactly
     // the same.
 
-    let filter = match &args.platform.as_slice() {
-        [] => None,
-        [p] => Some(p),
-        _ => anyhow::bail!("Specifying multiple targets is not currently supported"),
+    let filter = match &config.platforms.as_deref() {
+        None | Some([]) => None,
+        Some([p]) => Some(p),
+        Some(_) => anyhow::bail!("Specifying multiple targets is not currently supported"),
     };
 
     let other_args = filter.map(|s| format!("--filter-platform={s}")).into_iter();
@@ -187,14 +241,14 @@ fn run() -> Result<()> {
         anyhow::bail!("Failed to execute cargo vendor: {:?}", status);
     }
 
-    let root = meta.root_package().map(|p| &p.id);
+    let root = meta.root_package();
 
     let mut pkgs_by_name = BTreeMap::<_, Vec<_>>::new();
     for pkg in packages {
         let name = pkg.name.as_str();
         // Skip ourself
-        if let Some(rootid) = root {
-            if &pkg.id == rootid {
+        if let Some(root) = root {
+            if pkg.id == root.id {
                 continue;
             }
         }
@@ -269,7 +323,14 @@ fn run() -> Result<()> {
             assert!(unreferenced.insert(name.to_string()));
         }
 
-        debug_assert!(pbuf.pop());
+        let r = pbuf.pop();
+        debug_assert!(r);
+    }
+
+    if !had_config {
+        eprintln!("Notice: No vendor filtering enabled");
+    } else if let Some(platforms) = config.platforms.as_deref() {
+        eprintln!("Filtered to target platforms: {:?}", platforms);
     }
 
     Ok(())
@@ -279,5 +340,17 @@ fn main() {
     if let Err(e) = run() {
         eprintln!("{:#}", e);
         std::process::exit(1);
+    }
+}
+
+#[test]
+fn test_parse_config() {
+    let valid = vec![
+        serde_json::json!({}),
+        serde_json::json!({ "platforms": ["aarch64-unknown-linux-gnu"]}),
+        serde_json::json!({ "platforms": ["aarch64-unknown-linux-gnu"], "all-features": true}),
+    ];
+    for case in valid {
+        let _: VendorFilter = serde_json::from_value(case).unwrap();
     }
 }
