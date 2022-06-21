@@ -8,6 +8,8 @@ use std::io::{BufReader, Write};
 use std::process::Command;
 
 const CONFIG_KEY: &str = "vendor-filter";
+const SELF_NAME: &str = "vendor-filterer";
+const VENDOR_DEFAULT_PATH: &str = "vendor";
 
 /// This is the .cargo-checksum.json in a crate/package.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,7 +82,7 @@ struct Args {
     format: OutputTarget,
 
     /// The output path
-    #[clap(default_value = "vendor")]
+    #[clap(default_value = VENDOR_DEFAULT_PATH)]
     path: Utf8PathBuf,
 }
 
@@ -200,7 +202,12 @@ fn gather_config(args: &Args) -> Result<Option<VendorFilter>> {
 }
 
 fn run() -> Result<()> {
-    let args = Args::parse();
+    let mut args = Args::parse();
+    // When invoked as a subcommand of `cargo`, it passes the subcommand name as
+    // the second argument, which is a bit inconvenient for us.  Special case that.
+    if args.path.as_str() == SELF_NAME {
+        args.path = VENDOR_DEFAULT_PATH.into();
+    }
 
     let (had_config, config) = if let Some(c) = gather_config(&args)? {
         (true, c)
