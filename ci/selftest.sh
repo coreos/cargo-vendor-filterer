@@ -15,16 +15,28 @@ fi
 grep -q 'Specifying multiple targets is not currently supported' err.txt
 echo "ok errors"
 
+verify_no_windows() {
+    test $(stat --printf="%s" vendor/winapi/src/lib.rs) = 0
+    test $(ls vendor/winapi/src | wc -l) = 1
+}
+
 echo "Verifying linux"
 cargo-vendor-filterer --platform=x86_64-unknown-linux-gnu
-test $(stat --printf="%s" vendor/winapi/src/lib.rs) = 0
-test $(ls vendor/winapi/src | wc -l) = 1
+verify_no_windows
 rm vendor -rf
 echo "ok linux only"
 
 # Default
 cargo-vendor-filterer
 test $(stat --printf="%s" vendor/winapi/src/lib.rs) != 0
+rm vendor -rf
 echo "ok default"
+
+echo "Verifying linux via config"
+sed -i -e s,'^### ',, Cargo.toml
+cargo-vendor-filterer
+verify_no_windows
+rm vendor -rf
+echo "ok linux only via config"
 
 rm "${tmpd}" -rf
