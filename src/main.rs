@@ -202,12 +202,14 @@ fn gather_config(args: &Args) -> Result<Option<VendorFilter>> {
 }
 
 fn run() -> Result<()> {
-    let mut args = Args::parse();
+    let mut args = std::env::args().collect::<Vec<_>>();
     // When invoked as a subcommand of `cargo`, it passes the subcommand name as
     // the second argument, which is a bit inconvenient for us.  Special case that.
-    if args.path.as_str() == SELF_NAME {
-        args.path = VENDOR_DEFAULT_PATH.into();
+    if args.get(1).map(|s| s.as_str()) == Some(SELF_NAME) {
+        args.remove(1);
     }
+
+    let args = Args::parse_from(args);
 
     let (had_config, config) = if let Some(c) = gather_config(&args)? {
         (true, c)
