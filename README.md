@@ -59,7 +59,6 @@ This uses the suggested code from https://reproducible-builds.org/docs/archives/
 to output a reproducible archive; in other words, another process/tool
 can also perform a `git clone` of your project and regenerate the vendor
 tarball to verify it.
-```
 
 # TODO
 
