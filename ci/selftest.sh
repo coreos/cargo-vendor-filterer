@@ -8,6 +8,9 @@ tmp_git=${tmpd}/self
 git clone ${srcdir} ${tmp_git}
 cd ${tmp_git}
 
+# This exists right now, but we will test removing it
+hex_benches=vendor/hex/benches
+
 echo "Test errors"
 if cargo-vendor-filterer --platform=x86_64-unknown-linux-gnu --platform=aarch64-unknown-linux-gnu 2>err.txt; then
     exit 1
@@ -21,8 +24,9 @@ verify_no_windows() {
 }
 
 echo "Verifying linux"
-cargo-vendor-filterer --platform=x86_64-unknown-linux-gnu
+cargo-vendor-filterer --platform=x86_64-unknown-linux-gnu --exclude-crate-path='hex#benches'
 verify_no_windows
+test '!' -d "${hex_benches}"
 rm vendor -rf
 echo "ok linux only"
 
@@ -34,14 +38,16 @@ echo "ok linux only subcommand"
 
 # Default
 cargo-vendor-filterer
+test -d "${hex_benches}"
 test $(stat --printf="%s" vendor/winapi/src/lib.rs) != 0
 rm vendor -rf
 echo "ok default"
 
-echo "Verifying linux via config"
+echo "Verifying via config"
 sed -i -e s,'^### ',, Cargo.toml
 cargo-vendor-filterer
 verify_no_windows
+test '!' -d "${hex_benches}"
 rm vendor -rf
 echo "ok linux only via config"
 

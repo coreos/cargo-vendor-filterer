@@ -3,13 +3,14 @@ use camino::{Utf8Path, Utf8PathBuf};
 use cargo_metadata::{CargoOpt::AllFeatures, MetadataCommand};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufReader, Write};
 use std::process::Command;
 
 const CONFIG_KEY: &str = "vendor-filter";
 const SELF_NAME: &str = "vendor-filterer";
 const VENDOR_DEFAULT_PATH: &str = "vendor";
+const CARGO_CHECKSUM: &str = ".cargo-checksum.json";
 
 /// This is the .cargo-checksum.json in a crate/package.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,11 +58,31 @@ impl clap::ValueEnum for OutputTarget {
     }
 }
 
-#[derive(PartialEq, Eq, Deserialize, Default, Debug)]
+#[derive(PartialEq, Eq, Deserialize, Debug)]
+#[serde(rename_all = "kebab-case")]
+struct CrateExclude {
+    name: String,
+    exclude: String,
+}
+
+impl CrateExclude {
+    fn parse_str(s: &str) -> Result<Self> {
+        let (k, v) = s
+            .split_once('#')
+            .ok_or_else(|| anyhow::anyhow!("Missing '#' in crate exclude"))?;
+        Ok(Self {
+            name: k.to_string(),
+            exclude: v.to_string(),
+        })
+    }
+}
+
+#[derive(PartialEq, Eq, Deserialize, Debug, Default)]
 #[serde(rename_all = "kebab-case")]
 struct VendorFilter {
     platforms: Option<Vec<String>>,
     all_features: Option<bool>,
+    exclude_crate_paths: Option<Vec<CrateExclude>>,
 }
 
 /// Enhanced `cargo vendor` with filtering
@@ -73,6 +94,18 @@ struct Args {
     /// For example, `x86_64-unknown-linux-gnu`.
     #[clap(long)]
     platform: Option<Vec<String>>,
+
+    /// Remove files/subdirectories in crates that match a regular expression.
+    ///
+    /// The format is "CRATENAME#PATH".  CRATENAME is the name of a crate (without
+    /// a version included).  PATH must be a relative path, and can name a regular
+    /// file, symbolic link or a directory.
+    ///
+    /// If the filename matches a directory, it and all its contents will be removed.
+    /// For example, `curl-sys#curl` will remove the vendored libcurl C sources
+    /// from the `curl-sys` crate.
+    #[clap(long)]
+    exclude_crate_path: Option<Vec<String>>,
 
     /// Enable all features
     #[clap(long)]
@@ -120,7 +153,7 @@ fn replace_with_stub(path: &Utf8Path) -> Result<()> {
     let name = &root.name;
     let version = &root.version;
     let edition = &root.edition;
-    let checksums_path = path.join(".cargo-checksum.json");
+    let checksums_path = path.join(CARGO_CHECKSUM);
     let checksums = std::fs::File::open(&checksums_path).map(BufReader::new)?;
     let mut checksums: CargoChecksums =
         serde_json::from_reader(checksums).with_context(|| format!("Parsing {checksums_path}"))?;
@@ -180,18 +213,31 @@ impl VendorFilter {
         Ok(Some(v))
     }
 
-    fn parse_args(args: &Args) -> Option<Self> {
-        let args_unset = args.platform.is_none() && args.all_features.is_none();
-        (!args_unset).then(|| Self {
+    fn parse_args(args: &Args) -> Result<Option<Self>> {
+        let args_unset = args.platform.is_none()
+            && args.all_features.is_none()
+            && args.exclude_crate_path.is_none();
+        let exclude_crate_paths = args
+            .exclude_crate_path
+            .as_ref()
+            .map(|v| {
+                v.iter()
+                    .map(|e| CrateExclude::parse_str(e))
+                    .collect::<Result<Vec<_>>>()
+            })
+            .transpose()?;
+        let r = (!args_unset).then(|| Self {
             platforms: args.platform.clone(),
             all_features: args.all_features,
-        })
+            exclude_crate_paths,
+        });
+        Ok(r)
     }
 }
 
 fn gather_config(args: &Args) -> Result<Option<VendorFilter>> {
     // Accept config from arguments first
-    if let Some(f) = VendorFilter::parse_args(args) {
+    if let Some(f) = VendorFilter::parse_args(args)? {
         return Ok(Some(f));
     };
     let meta = MetadataCommand::new()
@@ -200,6 +246,44 @@ fn gather_config(args: &Args) -> Result<Option<VendorFilter>> {
     meta.root_package()
         .and_then(|r| VendorFilter::parse_json(&r.metadata).transpose())
         .transpose()
+}
+
+fn process_excludes(path: &Utf8PathBuf, name: &str, excludes: &[&str]) -> Result<()> {
+    let mut matched = false;
+    for exclude in excludes.iter().map(Utf8Path::new) {
+        if exclude.is_absolute() {
+            anyhow::bail!("Invalid absolute path in crate exclude {name} {exclude}");
+        }
+        let path = path.join(exclude);
+
+        if path.exists() {
+            std::fs::remove_dir_all(path)?;
+            eprintln!("Removed from crate {name}: {exclude}");
+            matched = true;
+        } else {
+            eprintln!("Warning: No match for exclude for crate {name}: {exclude}");
+        }
+    }
+    if matched {
+        let checksums_path = path.join(CARGO_CHECKSUM);
+        let checksums = std::fs::File::open(&checksums_path).map(BufReader::new)?;
+        let mut checksums: CargoChecksums = serde_json::from_reader(checksums)
+            .with_context(|| format!("Parsing {checksums_path}"))?;
+        let orig = checksums.files.len();
+        checksums.files.retain(|k, _| {
+            let k = Utf8Path::new(k);
+            for exclude in excludes.iter().map(Utf8Path::new) {
+                if k.starts_with(exclude) {
+                    return false;
+                }
+            }
+            true
+        });
+        assert_ne!(orig, checksums.files.len());
+        let mut w = std::fs::File::create(checksums_path).map(std::io::BufWriter::new)?;
+        serde_json::to_writer(&mut w, &checksums)?;
+    }
+    Ok(())
 }
 
 fn run() -> Result<()> {
@@ -318,10 +402,23 @@ fn run() -> Result<()> {
         }
     }
 
+    let excludes = config
+        .exclude_crate_paths
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .try_fold(HashMap::<&str, Vec<&str>>::new(), |mut m, v| {
+            let name = v.name.as_str();
+            let exclude = v.exclude.as_str();
+            let a = m.entry(name).or_default();
+            a.push(exclude);
+            Ok::<_, anyhow::Error>(m)
+        })?;
+
     let mut pbuf = args.path.clone();
     let mut unreferenced = HashSet::new();
-    // First pass, find and physically delete unreferenced packages, also
-    // gathering up the set of packages that we deleted.
+
+    // Find and physically delete unreferenced packages, and apply filters.
     for entry in args.path.read_dir_utf8()? {
         let entry = entry?;
         let name = entry.file_name();
@@ -331,6 +428,10 @@ fn run() -> Result<()> {
             replace_with_stub(&pbuf).with_context(|| format!("Replacing with stub: {name}"))?;
             eprintln!("Replacing unreferenced package with stub: {name}");
             assert!(unreferenced.insert(name.to_string()));
+        }
+
+        if let Some(excludes) = excludes.get(name) {
+            process_excludes(&pbuf, name, &excludes)?;
         }
 
         let r = pbuf.pop();
@@ -355,12 +456,17 @@ fn main() {
 
 #[test]
 fn test_parse_config() {
+    use serde_json::json;
+
     let valid = vec![
-        serde_json::json!({}),
-        serde_json::json!({ "platforms": ["aarch64-unknown-linux-gnu"]}),
-        serde_json::json!({ "platforms": ["aarch64-unknown-linux-gnu"], "all-features": true}),
+        json!({}),
+        json!({ "platforms": ["aarch64-unknown-linux-gnu"]}),
+        json!({ "platforms": ["aarch64-unknown-linux-gnu"], "all-features": true}),
     ];
     for case in valid {
         let _: VendorFilter = serde_json::from_value(case).unwrap();
     }
+    let filter = json!({ "exclude-crate-paths": [ { "name": "hex", "exclude": "benches" }, { "name": "curl", "exclude": "curl" } ]});
+    let r: VendorFilter = serde_json::from_value(filter).unwrap();
+    assert_eq!(r.exclude_crate_paths.unwrap().len(), 2);
 }
