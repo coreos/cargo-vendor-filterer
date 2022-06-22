@@ -3,6 +3,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use cargo_metadata::{CargoOpt::AllFeatures, MetadataCommand};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufReader, Write};
 use std::process::Command;
@@ -11,6 +12,8 @@ use std::vec;
 const CONFIG_KEY: &str = "vendor-filter";
 const SELF_NAME: &str = "vendor-filterer";
 const VENDOR_DEFAULT_PATH: &str = "vendor";
+const VENDOR_DEFAULT_PATH_TAR: &str = "vendor.tar";
+const VENDOR_DEFAULT_PATH_TAR_ZSTD: &str = "vendor.tar.zstd";
 const CARGO_CHECKSUM: &str = ".cargo-checksum.json";
 const OFFLINE: &str = "--offline";
 
@@ -38,8 +41,12 @@ struct CargoPackage {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum OutputTarget {
+    /// Write to a directory; the default path is `vendor`
     Dir,
-    //    Tar,
+    /// Write to an uncompressed (reproducible) tar archive; the default path is vendor.tar
+    Tar,
+    /// Write to a zstd-compressed (reproducible) tarball; the default path is vendor.tar.zstd
+    TarZstd,
 }
 
 impl Default for OutputTarget {
@@ -50,12 +57,14 @@ impl Default for OutputTarget {
 
 impl clap::ValueEnum for OutputTarget {
     fn value_variants<'a>() -> &'a [Self] {
-        &[Self::Dir]
+        &[Self::Dir, Self::Tar, Self::TarZstd]
     }
 
     fn to_possible_value<'a>(&self) -> Option<clap::PossibleValue<'a>> {
         match self {
             Self::Dir => Some(clap::PossibleValue::new("dir")),
+            Self::Tar => Some(clap::PossibleValue::new("tar")),
+            Self::TarZstd => Some(clap::PossibleValue::new("tar.zstd")),
         }
     }
 }
@@ -121,8 +130,7 @@ struct Args {
     format: OutputTarget,
 
     /// The output path
-    #[clap(default_value = VENDOR_DEFAULT_PATH)]
-    path: Utf8PathBuf,
+    path: Option<Utf8PathBuf>,
 }
 
 // cargo does autodiscovery of the workspace, and as far as I can tell
@@ -299,6 +307,55 @@ fn process_excludes(path: &Utf8PathBuf, name: &str, excludes: &[&str]) -> Result
     Ok(())
 }
 
+fn git_source_date_epoch(dir: &Utf8Path) -> Result<u64> {
+    let o = Command::new("git")
+        .args(&["log", "-1", "--pretty=%ct"])
+        .current_dir(dir)
+        .output()?;
+    if !o.status.success() {
+        anyhow::bail!("git exited with an error: {:?}", o);
+    }
+    let buf =
+        String::from_utf8(o.stdout).with_context(|| format!("Failed to parse git log output"))?;
+    let r = buf.trim().parse()?;
+    Ok(r)
+}
+
+fn generate_tar_from(srcdir: &Utf8Path, dest: &Utf8Path, zstd_compress: bool) -> Result<()> {
+    let envkey = "SOURCE_DATE_EPOCH";
+    let source_date_epoch_env = std::env::var_os(envkey);
+    let source_date_epoch_env = source_date_epoch_env
+        .as_ref()
+        .map(|v| {
+            v.to_str()
+                .map(Cow::Borrowed)
+                .ok_or_else(|| anyhow!("Invalid value for {envkey}"))
+        })
+        .transpose()?;
+    let source_date_epoch = source_date_epoch_env.map(Ok).unwrap_or_else(|| {
+        git_source_date_epoch(Utf8Path::new(".")).map(|v| Cow::Owned(v.to_string()))
+    })?;
+
+    let compress = zstd_compress.then(|| "--zstd");
+    Command::new("tar")
+        .args(&[
+            "-c",
+            "-C",
+            srcdir.as_str(),
+            "--sort=name",
+            "--owner=0",
+            "--group=0",
+            "--numeric-owner",
+            "--pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime",
+        ])
+        .args(compress)
+        .arg(format!("--mtime=@{source_date_epoch}"))
+        .args(["-f", dest.as_str(), "."])
+        .status()
+        .with_context(|| format!("Failed to execute tar"))?;
+    Ok(())
+}
+
 /// An inner version of `main`; the primary code.
 fn run() -> Result<()> {
     let mut args = std::env::args().collect::<Vec<_>>();
@@ -318,6 +375,29 @@ fn run() -> Result<()> {
     if !had_config {
         eprintln!("NOTE: No vendor filtering enabled");
     }
+
+    let tempdir = match args.format {
+        OutputTarget::Tar | OutputTarget::TarZstd => Some(tempfile::tempdir_in(".")?),
+        OutputTarget::Dir => None,
+    };
+    let tempdir_path: Option<&Utf8Path> = tempdir
+        .as_ref()
+        .map(|td| td.path().try_into())
+        .transpose()?;
+    let final_output_path = args.path.unwrap_or_else(|| {
+        match args.format {
+            OutputTarget::Dir => VENDOR_DEFAULT_PATH,
+            OutputTarget::Tar => VENDOR_DEFAULT_PATH_TAR,
+            OutputTarget::TarZstd => VENDOR_DEFAULT_PATH_TAR_ZSTD,
+        }
+        .into()
+    });
+    let output_dir = tempdir_path
+        .map(|v| Cow::Owned(v.join("vendor")))
+        .unwrap_or_else(|| match args.format {
+            OutputTarget::Dir => Cow::Borrowed(final_output_path.as_path()),
+            _ => unreachable!(),
+        });
 
     let mut command = MetadataCommand::new();
     command.other_options(vec![OFFLINE.to_string()]);
@@ -339,14 +419,14 @@ fn run() -> Result<()> {
     let meta = command.exec().context("Executing cargo metadata")?;
     let packages = &meta.packages;
 
-    if args.path.exists() {
-        anyhow::bail!("Refusing to operate on extant directory: {}", args.path);
+    if output_dir.exists() {
+        anyhow::bail!("Refusing to operate on extant directory: {}", output_dir);
     }
 
     let status = Command::new("cargo")
         .args(&["vendor"])
         .arg(OFFLINE)
-        .arg(args.path.as_str())
+        .arg(&*output_dir)
         .status()?;
     if !status.success() {
         anyhow::bail!("Failed to execute cargo vendor: {:?}", status);
@@ -395,7 +475,7 @@ fn run() -> Result<()> {
 
     let mut package_filenames = BTreeMap::new();
     for (name, pkg) in unversioned_packages {
-        let name_path = args.path.join(name);
+        let name_path = output_dir.join(name);
         if !name_path.exists() {
             anyhow::bail!("Failed to find vendored dependency: {name}");
         }
@@ -408,8 +488,8 @@ fn run() -> Result<()> {
     // We build up a map of those here to their original package.
     for (namever, pkg) in multiversioned_packages {
         let name = &pkg.name;
-        let namever_path = args.path.join(&namever);
-        let name_path = args.path.join(name);
+        let namever_path = output_dir.join(&namever);
+        let name_path = output_dir.join(name);
         if namever_path.exists() {
             package_filenames.insert(namever, pkg);
         } else if name_path.exists() {
@@ -432,11 +512,11 @@ fn run() -> Result<()> {
             Ok::<_, anyhow::Error>(m)
         })?;
 
-    let mut pbuf = args.path.clone();
+    let mut pbuf = Utf8PathBuf::from(&*output_dir);
     let mut unreferenced = HashSet::new();
 
     // Find and physically delete unreferenced packages, and apply filters.
-    for entry in args.path.read_dir_utf8()? {
+    for entry in output_dir.read_dir_utf8()? {
         let entry = entry?;
         let name = entry.file_name();
         pbuf.push(name);
@@ -455,12 +535,19 @@ fn run() -> Result<()> {
         debug_assert!(r);
     }
 
+    match args.format {
+        OutputTarget::Tar => generate_tar_from(&*output_dir, &final_output_path, false)?,
+        OutputTarget::TarZstd => generate_tar_from(&*output_dir, &final_output_path, true)?,
+        OutputTarget::Dir => {}
+    };
+
     if !had_config {
         eprintln!("Notice: No vendor filtering enabled");
     } else if let Some(platforms) = config.platforms.as_deref() {
         eprintln!("Filtered to target platforms: {:?}", platforms);
     }
 
+    println!("Generated: {final_output_path}");
     Ok(())
 }
 

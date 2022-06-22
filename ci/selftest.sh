@@ -33,8 +33,24 @@ echo "ok linux only"
 echo "Verifying linux as subcommand"
 cargo vendor-filterer --platform=x86_64-unknown-linux-gnu
 verify_no_windows
+test '!' -f vendor.tar.zstd
 rm vendor -rf
 echo "ok linux only subcommand"
+
+echo "Verifying linux + output to tar zstd"
+cargo vendor-filterer --platform=x86_64-unknown-linux-gnu --format=tar.zstd
+zstdcat vendor.tar.zstd | tar tf - > out.txt
+grep -qF './anyhow' out.txt
+rm -v vendor.tar.zstd out.txt
+echo "ok linux + output to tar"
+
+echo "Verifying linux + output to tar"
+cargo vendor-filterer --platform=x86_64-unknown-linux-gnu --format=tar
+tar tf - < vendor.tar > out.txt
+grep -qF './anyhow' out.txt
+rm -v vendor.tar out.txt
+echo "ok linux + output to tar"
+
 
 # Default
 cargo-vendor-filterer

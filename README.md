@@ -44,29 +44,21 @@ All of these options have corresponding CLI flags; see `cargo vendor-filterer --
 
 # Generating reproducible vendor tarballs
 
-The output from this project is a directory; however, many projects will
-want to serialize this to a single file archive (such as tar) in order
-to attach to e.g. a Github/Gitlab release.
+You can also provide `--format=tar.zstd` to output a reproducible tar archive
+compressed via zstd; the default filename will be `vendor.tar.zstd`.  Similarly
+there is `--format=tar` to output an uncompressed tar archive, which you
+can compress however you like.
 
-For more information on how to do this, see https://reproducible-builds.org/docs/archives/
+This option requires:
 
-An example script:
+ - An external GNU `tar` program
+ - An external `zstd` program (for `--format=tar.zstd`)
+ - `SOURCE_DATE_EPOCH` set in the environment, or an external `git` and the working directory must be a git repository
 
-```
-#!/usr/bin/bash
-set -xeuo pipefail
-# Vendor dependencies; this assumes you are using metadata in Cargo.toml
-cargo vendor-filterer
-# Gather the timestamp from git; https://reproducible-builds.org/docs/source-date-epoch/
-SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)
-# Example from https://reproducible-builds.org/docs/archives/ modified to also use zstd compression
-tar --sort=name \
-      --mtime="@${SOURCE_DATE_EPOCH}" \
-      --owner=0 --group=0 --numeric-owner \
-      --pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime \
-      --zstd \
-      -cf vendor.tar.zstd vendor
-rm vendor -rf
+This uses the suggested code from https://reproducible-builds.org/docs/archives/
+to output a reproducible archive; in other words, another process/tool
+can also perform a `git clone` of your project and regenerate the vendor
+tarball to verify it.
 ```
 
 # TODO
