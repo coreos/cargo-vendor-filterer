@@ -42,6 +42,33 @@ exclude-crate-paths = [ { name = "curl-sys", exclude = "curl" },
 
 All of these options have corresponding CLI flags; see `cargo vendor-filterer --help`.
 
+# Generating reproducible vendor tarballs
+
+The output from this project is a directory; however, many projects will
+want to serialize this to a single file archive (such as tar) in order
+to attach to e.g. a Github/Gitlab release.
+
+For more information on how to do this, see https://reproducible-builds.org/docs/archives/
+
+An example script:
+
+```
+#!/usr/bin/bash
+set -xeuo pipefail
+# Vendor dependencies; this assumes you are using metadata in Cargo.toml
+cargo vendor-filterer
+# Gather the timestamp from git; https://reproducible-builds.org/docs/source-date-epoch/
+SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)
+# Example from https://reproducible-builds.org/docs/archives/ modified to also use zstd compression
+tar --sort=name \
+      --mtime="@${SOURCE_DATE_EPOCH}" \
+      --owner=0 --group=0 --numeric-owner \
+      --pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime \
+      --zstd \
+      -cf vendor.tar.zstd vendor
+rm vendor -rf
+```
+
 # TODO
 
 We only support a single `--platform` right now, so if e.g.
