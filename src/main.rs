@@ -312,7 +312,7 @@ fn run() -> Result<()> {
         (false, VendorFilter::default())
     };
     if !had_config {
-        eprintln!("Notice: No vendor filtering enabled");
+        eprintln!("NOTE: No vendor filtering enabled");
     }
 
     let mut command = MetadataCommand::new();
