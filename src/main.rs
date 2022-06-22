@@ -129,6 +129,9 @@ struct Args {
     #[clap(long, value_parser, default_value = "dir")]
     format: OutputTarget,
 
+    /// Run without accessing the network; this is passed down to e.g. `cargo metadata --offline`.
+    offline: bool,
+
     /// The output path
     path: Option<Utf8PathBuf>,
 }
@@ -151,14 +154,16 @@ fn inject_dummy_workspace(path: &Utf8Path) -> Result<()> {
 ///
 /// Entirely removing the crates would require editing the dependency graph,
 /// which gets into more work.
-fn replace_with_stub(path: &Utf8Path) -> Result<()> {
+fn replace_with_stub(path: &Utf8Path, offline: bool) -> Result<()> {
     inject_dummy_workspace(path).context("Injecting dummy [workspace]")?;
 
     // Gather metadata for just this dependency, not recursively.
     let mut command = MetadataCommand::new();
     command.current_dir(path);
     command.no_deps();
-    command.other_options(vec![OFFLINE.to_string()]);
+    if offline {
+        command.other_options(vec![OFFLINE.to_string()]);
+    }
     let meta = command.exec().context("Executing cargo metadata")?;
 
     let root = meta
@@ -259,8 +264,11 @@ fn gather_config(args: &Args) -> Result<Option<VendorFilter>> {
         return Ok(Some(f));
     };
     // Otherwise gather from `package.metadata.vendor-filter` in Cargo.toml
-    let meta = MetadataCommand::new()
-        .other_options(vec![OFFLINE.to_string()])
+    let mut meta = MetadataCommand::new();
+    if args.offline {
+        meta.other_options(vec![OFFLINE.to_string()]);
+    }
+    let meta = meta
         .exec()
         .context("Executing cargo metadata (first run)")?;
     meta.root_package()
@@ -400,7 +408,9 @@ fn run() -> Result<()> {
         });
 
     let mut command = MetadataCommand::new();
-    command.other_options(vec![OFFLINE.to_string()]);
+    if args.offline {
+        command.other_options(vec![OFFLINE.to_string()]);
+    }
 
     if config.all_features.unwrap_or_default() {
         command.features(AllFeatures);
@@ -425,7 +435,7 @@ fn run() -> Result<()> {
 
     let status = Command::new("cargo")
         .args(&["vendor"])
-        .arg(OFFLINE)
+        .args(args.offline.then(|| OFFLINE))
         .arg(&*output_dir)
         .status()?;
     if !status.success() {
@@ -522,7 +532,8 @@ fn run() -> Result<()> {
         pbuf.push(name);
 
         if !package_filenames.contains_key(name) {
-            replace_with_stub(&pbuf).with_context(|| format!("Replacing with stub: {name}"))?;
+            replace_with_stub(&pbuf, args.offline)
+                .with_context(|| format!("Replacing with stub: {name}"))?;
             eprintln!("Replacing unreferenced package with stub: {name}");
             assert!(unreferenced.insert(name.to_string()));
         }
