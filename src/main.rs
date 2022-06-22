@@ -6,11 +6,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufReader, Write};
 use std::process::Command;
+use std::vec;
 
 const CONFIG_KEY: &str = "vendor-filter";
 const SELF_NAME: &str = "vendor-filterer";
 const VENDOR_DEFAULT_PATH: &str = "vendor";
 const CARGO_CHECKSUM: &str = ".cargo-checksum.json";
+const OFFLINE: &str = "--offline";
 
 /// This is the .cargo-checksum.json in a crate/package.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -148,6 +150,7 @@ fn replace_with_stub(path: &Utf8Path) -> Result<()> {
     let mut command = MetadataCommand::new();
     command.current_dir(path);
     command.no_deps();
+    command.other_options(vec![OFFLINE.to_string()]);
     let meta = command.exec().context("Executing cargo metadata")?;
 
     let root = meta
@@ -249,6 +252,7 @@ fn gather_config(args: &Args) -> Result<Option<VendorFilter>> {
     };
     // Otherwise gather from `package.metadata.vendor-filter` in Cargo.toml
     let meta = MetadataCommand::new()
+        .other_options(vec![OFFLINE.to_string()])
         .exec()
         .context("Executing cargo metadata (first run)")?;
     meta.root_package()
@@ -316,6 +320,8 @@ fn run() -> Result<()> {
     }
 
     let mut command = MetadataCommand::new();
+    command.other_options(vec![OFFLINE.to_string()]);
+
     if config.all_features.unwrap_or_default() {
         command.features(AllFeatures);
     }
@@ -339,6 +345,7 @@ fn run() -> Result<()> {
 
     let status = Command::new("cargo")
         .args(&["vendor"])
+        .arg(OFFLINE)
         .arg(args.path.as_str())
         .status()?;
     if !status.success() {
