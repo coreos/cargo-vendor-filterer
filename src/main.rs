@@ -95,7 +95,7 @@ struct Args {
     #[clap(long)]
     platform: Option<Vec<String>>,
 
-    /// Remove files/subdirectories in crates that match a regular expression.
+    /// Remove files/subdirectories in crates that match an exact path.
     ///
     /// The format is "CRATENAME#PATH".  CRATENAME is the name of a crate (without
     /// a version included).  PATH must be a relative path, and can name a regular
@@ -104,6 +104,8 @@ struct Args {
     /// If the filename matches a directory, it and all its contents will be removed.
     /// For example, `curl-sys#curl` will remove the vendored libcurl C sources
     /// from the `curl-sys` crate.
+    ///
+    /// Nonexistent paths will emit a warning, but are not currently an error.
     #[clap(long)]
     exclude_crate_path: Option<Vec<String>>,
 
@@ -111,6 +113,8 @@ struct Args {
     #[clap(long)]
     all_features: Option<bool>,
 
+    /// Pick the output format; the only currently available option is `dir`,
+    /// which writes to a directory.  The default value is `vendor`.
     #[clap(long, value_parser, default_value = "dir")]
     format: OutputTarget,
 
@@ -202,6 +206,7 @@ fn replace_with_stub(path: &Utf8Path) -> Result<()> {
 }
 
 impl VendorFilter {
+    /// Parse a value from `package.metadata.vendor-filter`.
     fn parse_json(meta: &serde_json::Value) -> Result<Option<Self>> {
         let meta = meta.as_object().and_then(|o| o.get(CONFIG_KEY));
         let meta = if let Some(m) = meta {
@@ -213,6 +218,7 @@ impl VendorFilter {
         Ok(Some(v))
     }
 
+    /// Parse the subset of CLI arguments that affect vendor content into a filter.
     fn parse_args(args: &Args) -> Result<Option<Self>> {
         let args_unset = args.platform.is_none()
             && args.all_features.is_none()
@@ -235,11 +241,13 @@ impl VendorFilter {
     }
 }
 
+/// Process CLI arguments into a filter.
 fn gather_config(args: &Args) -> Result<Option<VendorFilter>> {
-    // Accept config from arguments first
+    // Accept config from arguments first in preference to Cargo.toml metadata.
     if let Some(f) = VendorFilter::parse_args(args)? {
         return Ok(Some(f));
     };
+    // Otherwise gather from `package.metadata.vendor-filter` in Cargo.toml
     let meta = MetadataCommand::new()
         .exec()
         .context("Executing cargo metadata (first run)")?;
@@ -248,6 +256,7 @@ fn gather_config(args: &Args) -> Result<Option<VendorFilter>> {
         .transpose()
 }
 
+/// Given a crate, remove matching files/directories in excludes.
 fn process_excludes(path: &Utf8PathBuf, name: &str, excludes: &[&str]) -> Result<()> {
     let mut matched = false;
     for exclude in excludes.iter().map(Utf8Path::new) {
@@ -286,6 +295,7 @@ fn process_excludes(path: &Utf8PathBuf, name: &str, excludes: &[&str]) -> Result
     Ok(())
 }
 
+/// An inner version of `main`; the primary code.
 fn run() -> Result<()> {
     let mut args = std::env::args().collect::<Vec<_>>();
     // When invoked as a subcommand of `cargo`, it passes the subcommand name as
@@ -447,8 +457,11 @@ fn run() -> Result<()> {
     Ok(())
 }
 
+/// Output
 fn main() {
     if let Err(e) = run() {
+        // I prefer seeing errors like error: While processing foo: No such file or directory
+        // instead of multi-line.
         eprintln!("{:#}", e);
         std::process::exit(1);
     }
