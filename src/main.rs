@@ -547,7 +547,7 @@ fn run() -> Result<()> {
         eprintln!("Filtered to target platforms: {:?}", platforms);
     }
 
-    println!("Generated: {final_output_path}");
+    eprintln!("Generated: {final_output_path}");
     Ok(())
 }
 
