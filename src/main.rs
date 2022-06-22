@@ -462,7 +462,7 @@ fn main() {
     if let Err(e) = run() {
         // I prefer seeing errors like error: While processing foo: No such file or directory
         // instead of multi-line.
-        eprintln!("{:#}", e);
+        eprintln!("error: {:#}", e);
         std::process::exit(1);
     }
 }
