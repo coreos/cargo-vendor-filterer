@@ -140,7 +140,7 @@ fn replace_with_stub(path: &Utf8Path) -> Result<()> {
         let digest =
             openssl::hash::hash(openssl::hash::MessageDigest::sha256(), contents.as_bytes())?;
         let digest = hex::encode(digest);
-        checksums.files.insert(fullpath.to_string(), digest);
+        checksums.files.insert(target.to_string(), digest);
         Ok::<_, anyhow::Error>(())
     };
     let features = root
