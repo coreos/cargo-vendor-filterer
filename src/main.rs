@@ -134,12 +134,13 @@ fn replace_with_stub(path: &Utf8Path) -> Result<()> {
 
     // Helper to both write a file and compute its sha256, storing it in the
     // cargo checksum list.
-    let mut writef = |path: &Utf8Path, contents: &str| {
-        std::fs::write(path, contents)?;
+    let mut writef = |target: &Utf8Path, contents: &str| {
+        let fullpath = path.join(target);
+        std::fs::write(&fullpath, contents)?;
         let digest =
             openssl::hash::hash(openssl::hash::MessageDigest::sha256(), contents.as_bytes())?;
         let digest = hex::encode(digest);
-        checksums.files.insert(path.to_string(), digest);
+        checksums.files.insert(fullpath.to_string(), digest);
         Ok::<_, anyhow::Error>(())
     };
     let features = root
@@ -157,9 +158,9 @@ fn replace_with_stub(path: &Utf8Path) -> Result<()> {
     };
     let new_manifest = toml::to_string(&new_manifest)?;
     // An empty Cargo.toml
-    writef(&path.join("Cargo.toml"), &new_manifest)?;
+    writef(Utf8Path::new("Cargo.toml"), &new_manifest)?;
     // And an empty source file
-    writef(&path.join("src/lib.rs"), "")?;
+    writef(Utf8Path::new("src/lib.rs"), "")?;
     // Finally, serialize the new checksums
     let mut w = std::fs::File::create(checksums_path).map(std::io::BufWriter::new)?;
     serde_json::to_writer(&mut w, &checksums)?;
