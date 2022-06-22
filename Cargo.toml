@@ -3,7 +3,7 @@ categories = ["development-tools::cargo-plugins", "command-line-utilities"]
 edition = "2021"
 license = "Apache-2.0"
 name = "cargo-vendor-filterer"
-version = "0.1.0"
+version = "0.5.0"
 
 #### Example configuration to filter to platform
 ### [package.metadata.vendor-filter]
