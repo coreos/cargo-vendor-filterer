@@ -46,13 +46,13 @@ All of these options have corresponding CLI flags; see `cargo vendor-filterer --
 
 You can also provide `--format=tar.zstd` to output a reproducible tar archive
 compressed via zstd; the default filename will be `vendor.tar.zstd`.  Similarly
-there is `--format=tar` to output an uncompressed tar archive, which you
+there is `--format=tar.gz` for gzip, and `--format=tar` to output an uncompressed tar archive, which you
 can compress however you like.
 
 This option requires:
 
  - An external GNU `tar` program
- - An external `zstd` program (for `--format=tar.zstd`)
+ - An external `gzip` or `zstd` program (for `--format=tar.gz` and `--format=tar.zstd` respectively)
  - `SOURCE_DATE_EPOCH` set in the environment, or an external `git` and the working directory must be a git repository
 
 This uses the suggested code from https://reproducible-builds.org/docs/archives/

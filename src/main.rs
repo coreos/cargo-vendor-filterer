@@ -20,6 +20,8 @@ const VENDOR_DEFAULT_PATH: &str = "vendor";
 const VENDOR_DEFAULT_PATH_TAR: &str = "vendor.tar";
 /// The default path for --format=tar.zstd
 const VENDOR_DEFAULT_PATH_TAR_ZSTD: &str = "vendor.tar.zstd";
+/// The default path for --format=tar.gz
+const VENDOR_DEFAULT_PATH_TAR_GZ: &str = "vendor.tar.gz";
 /// The filename cargo writes in packages with file checksums
 const CARGO_CHECKSUM: &str = ".cargo-checksum.json";
 /// The CLI argument passed to cargo to work offline
@@ -47,6 +49,27 @@ struct CargoPackage {
     edition: String,
 }
 
+/// Types of tar compression we support; gzip for compatibility, zstd is the modern baseline.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum Compression {
+    /// No compression
+    None,
+    /// Gzip is the legacy compression algorithm
+    Gzip,
+    /// Zstd is a modern compression baseline
+    Zstd,
+}
+
+impl Compression {
+    fn tar_switch(&self) -> Option<&'static str> {
+        match self {
+            Compression::None => None,
+            Compression::Gzip => Some("--gzip"),
+            Compression::Zstd => Some("--zstd"),
+        }
+    }
+}
+
 /// Output format; the default is a directory.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum OutputTarget {
@@ -54,6 +77,8 @@ enum OutputTarget {
     Dir,
     /// Write to an uncompressed (reproducible) tar archive; the default path is vendor.tar
     Tar,
+    /// Write to a gzip-compressed (reproducible) tarball; the default path is vendor.tar.zstd
+    TarGzip,
     /// Write to a zstd-compressed (reproducible) tarball; the default path is vendor.tar.zstd
     TarZstd,
 }
@@ -66,13 +91,14 @@ impl Default for OutputTarget {
 
 impl clap::ValueEnum for OutputTarget {
     fn value_variants<'a>() -> &'a [Self] {
-        &[Self::Dir, Self::Tar, Self::TarZstd]
+        &[Self::Dir, Self::Tar, Self::TarGzip, Self::TarZstd]
     }
 
     fn to_possible_value<'a>(&self) -> Option<clap::PossibleValue<'a>> {
         match self {
             Self::Dir => Some(clap::PossibleValue::new("dir")),
             Self::Tar => Some(clap::PossibleValue::new("tar")),
+            Self::TarGzip => Some(clap::PossibleValue::new("tar.gz")),
             Self::TarZstd => Some(clap::PossibleValue::new("tar.zstd")),
         }
     }
@@ -343,7 +369,7 @@ fn git_source_date_epoch(dir: &Utf8Path) -> Result<u64> {
 }
 
 /// Generate a reproducible tarball with optional zstd compression.
-fn generate_tar_from(srcdir: &Utf8Path, dest: &Utf8Path, zstd_compress: bool) -> Result<()> {
+fn generate_tar_from(srcdir: &Utf8Path, dest: &Utf8Path, compress: Compression) -> Result<()> {
     let envkey = "SOURCE_DATE_EPOCH";
     let source_date_epoch_env = std::env::var_os(envkey);
     let source_date_epoch_env = source_date_epoch_env
@@ -358,7 +384,6 @@ fn generate_tar_from(srcdir: &Utf8Path, dest: &Utf8Path, zstd_compress: bool) ->
         git_source_date_epoch(Utf8Path::new(".")).map(|v| Cow::Owned(v.to_string()))
     })?;
 
-    let compress = zstd_compress.then(|| "--zstd");
     Command::new("tar")
         .args(&[
             "-c",
@@ -370,7 +395,7 @@ fn generate_tar_from(srcdir: &Utf8Path, dest: &Utf8Path, zstd_compress: bool) ->
             "--numeric-owner",
             "--pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime",
         ])
-        .args(compress)
+        .args(compress.tar_switch())
         .arg(format!("--mtime=@{source_date_epoch}"))
         .args(["-f", dest.as_str(), "."])
         .status()
@@ -435,7 +460,9 @@ fn run() -> Result<()> {
     }
 
     let tempdir = match args.format {
-        OutputTarget::Tar | OutputTarget::TarZstd => Some(tempfile::tempdir_in(".")?),
+        OutputTarget::Tar | OutputTarget::TarGzip | OutputTarget::TarZstd => {
+            Some(tempfile::tempdir_in(".")?)
+        }
         OutputTarget::Dir => None,
     };
     let tempdir_path: Option<&Utf8Path> = tempdir
@@ -446,6 +473,7 @@ fn run() -> Result<()> {
         match args.format {
             OutputTarget::Dir => VENDOR_DEFAULT_PATH,
             OutputTarget::Tar => VENDOR_DEFAULT_PATH_TAR,
+            OutputTarget::TarGzip => VENDOR_DEFAULT_PATH_TAR_GZ,
             OutputTarget::TarZstd => VENDOR_DEFAULT_PATH_TAR_ZSTD,
         }
         .into()
@@ -595,8 +623,15 @@ fn run() -> Result<()> {
 
     // For tar archives, generate them now from the temporary directory.
     match args.format {
-        OutputTarget::Tar => generate_tar_from(&*output_dir, &final_output_path, false)?,
-        OutputTarget::TarZstd => generate_tar_from(&*output_dir, &final_output_path, true)?,
+        OutputTarget::Tar => {
+            generate_tar_from(&*output_dir, &final_output_path, Compression::None)?
+        }
+        OutputTarget::TarGzip => {
+            generate_tar_from(&*output_dir, &final_output_path, Compression::Gzip)?
+        }
+        OutputTarget::TarZstd => {
+            generate_tar_from(&*output_dir, &final_output_path, Compression::Zstd)?
+        }
         OutputTarget::Dir => {}
     };
 
