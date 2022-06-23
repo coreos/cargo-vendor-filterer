@@ -168,6 +168,7 @@ struct Args {
     format: OutputTarget,
 
     /// Run without accessing the network; this is passed down to e.g. `cargo metadata --offline`.
+    #[clap(long)]
     offline: bool,
 
     /// The output path

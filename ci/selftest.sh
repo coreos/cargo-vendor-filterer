@@ -9,32 +9,35 @@ git clone ${srcdir} ${tmp_git}
 cd ${tmp_git}
 
 # This exists right now, but we will test removing it
-hex_benches=vendor/hex/benches
+hex_benches=hex/benches
 
 verify_no_windows() {
-    test $(stat --printf="%s" vendor/winapi/src/lib.rs) = 0
-    test $(ls vendor/winapi/src | wc -l) = 1
+    (cd $1
+     test $(stat --printf="%s" winapi/src/lib.rs) = 0
+     test $(ls winapi/src | wc -l) = 1
+    )
 }
 
 echo "Verifying linux"
-cargo-vendor-filterer --platform=x86_64-unknown-linux-gnu  --platform=aarch64-unknown-linux-gnu --exclude-crate-path='hex#benches'
-verify_no_windows
+cargo-vendor-filterer --platform=x86_64-unknown-linux-gnu  --platform=aarch64-unknown-linux-gnu --exclude-crate-path='hex#benches' target/vendor
+test '!' -d vendor # We overrode the default
+verify_no_windows target/vendor
 test '!' -d "${hex_benches}"
-rm vendor -rf
+rm target/vendor -rf
 echo "ok linux only"
 
 echo "Verifying linux as subcommand"
 cargo vendor-filterer --platform=x86_64-unknown-linux-gnu
-verify_no_windows
+verify_no_windows vendor
 test '!' -f vendor.tar.zstd
 rm vendor -rf
 echo "ok linux only subcommand"
 
 echo "Verifying linux + output to tar zstd"
-cargo vendor-filterer --platform=x86_64-unknown-linux-gnu --format=tar.zstd
-zstdcat vendor.tar.zstd | tar tf - > out.txt
+cargo vendor-filterer --platform=x86_64-unknown-linux-gnu --format=tar.zstd mycrate-5.2.7.tar.zstd
+zstdcat mycrate-5.2.7.tar.zstd | tar tf - > out.txt
 grep -qF './anyhow' out.txt
-rm -v vendor.tar.zstd out.txt
+rm -v mycrate-5.2.7.tar.zstd out.txt
 echo "ok linux + output to tar"
 
 echo "Verifying linux + output to tar"
@@ -55,7 +58,7 @@ echo "ok default"
 echo "Verifying via config"
 sed -i -e s,'^### ',, Cargo.toml
 cargo-vendor-filterer
-verify_no_windows
+verify_no_windows vendor
 test '!' -d "${hex_benches}"
 rm vendor -rf
 echo "ok linux only via config"
