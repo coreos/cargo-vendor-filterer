@@ -9,12 +9,19 @@ use std::io::{BufReader, Write};
 use std::process::Command;
 use std::vec;
 
+/// The path we use in Cargo.toml i.e. `package.metadata.vendor-filter`
 const CONFIG_KEY: &str = "vendor-filter";
+/// The name of our binary
 const SELF_NAME: &str = "vendor-filterer";
+/// The default directory path
 const VENDOR_DEFAULT_PATH: &str = "vendor";
+/// The default path for --format=tar
 const VENDOR_DEFAULT_PATH_TAR: &str = "vendor.tar";
+/// The default path for --format=tar.zstd
 const VENDOR_DEFAULT_PATH_TAR_ZSTD: &str = "vendor.tar.zstd";
+/// The filename cargo writes in packages with file checksums
 const CARGO_CHECKSUM: &str = ".cargo-checksum.json";
+/// The CLI argument passed to cargo to work offline
 const OFFLINE: &str = "--offline";
 
 /// This is the .cargo-checksum.json in a crate/package.
@@ -39,6 +46,7 @@ struct CargoPackage {
     edition: String,
 }
 
+/// Output format; the default is a directory.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum OutputTarget {
     /// Write to a directory; the default path is `vendor`
@@ -69,6 +77,7 @@ impl clap::ValueEnum for OutputTarget {
     }
 }
 
+/// Exclude a file/directory from a crate.
 #[derive(PartialEq, Eq, Deserialize, Debug)]
 #[serde(rename_all = "kebab-case")]
 struct CrateExclude {
@@ -77,6 +86,7 @@ struct CrateExclude {
 }
 
 impl CrateExclude {
+    /// Parse a crate exclude in the form `CRATENAME#PATH`.
     fn parse_str(s: &str) -> Result<Self> {
         let (k, v) = s
             .split_once('#')
@@ -88,6 +98,7 @@ impl CrateExclude {
     }
 }
 
+/// The configuration used to filter the set of dependencies.
 #[derive(PartialEq, Eq, Deserialize, Debug, Default)]
 #[serde(rename_all = "kebab-case")]
 struct VendorFilter {
@@ -315,6 +326,7 @@ fn process_excludes(path: &Utf8PathBuf, name: &str, excludes: &[&str]) -> Result
     Ok(())
 }
 
+/// Return the timestamp of the latest git commit in seconds since the Unix epoch.
 fn git_source_date_epoch(dir: &Utf8Path) -> Result<u64> {
     let o = Command::new("git")
         .args(&["log", "-1", "--pretty=%ct"])
@@ -329,6 +341,7 @@ fn git_source_date_epoch(dir: &Utf8Path) -> Result<u64> {
     Ok(r)
 }
 
+/// Generate a reproducible tarball with optional zstd compression.
 fn generate_tar_from(srcdir: &Utf8Path, dest: &Utf8Path, zstd_compress: bool) -> Result<()> {
     let envkey = "SOURCE_DATE_EPOCH";
     let source_date_epoch_env = std::env::var_os(envkey);
@@ -433,6 +446,7 @@ fn run() -> Result<()> {
         anyhow::bail!("Refusing to operate on extant directory: {}", output_dir);
     }
 
+    // Run `cargo vendor` which will capture all dependencies.
     let status = Command::new("cargo")
         .args(&["vendor"])
         .args(args.offline.then(|| OFFLINE))
@@ -444,6 +458,7 @@ fn run() -> Result<()> {
 
     let root = meta.root_package();
 
+    // Create a mapping of name -> [package versions]
     let mut pkgs_by_name = BTreeMap::<_, Vec<_>>::new();
     for pkg in packages {
         let name = pkg.name.as_str();
@@ -469,6 +484,7 @@ fn run() -> Result<()> {
         v.push((name_version, pkg));
     }
 
+    // Split pkgs_by_name into ones that actually have multiple versions or not.
     let mut unversioned_packages = BTreeMap::new();
     let mut multiversioned_packages = BTreeMap::new();
     for (name, versions) in pkgs_by_name {
@@ -509,6 +525,7 @@ fn run() -> Result<()> {
         }
     }
 
+    // Index the excludes into a mapping from crate name -> [list of excludes].
     let excludes = config
         .exclude_crate_paths
         .as_deref()
@@ -522,6 +539,7 @@ fn run() -> Result<()> {
             Ok::<_, anyhow::Error>(m)
         })?;
 
+    // A reusable buffer (silly optimization to avoid allocating lots of path buffers)
     let mut pbuf = Utf8PathBuf::from(&*output_dir);
     let mut unreferenced = HashSet::new();
 
@@ -546,6 +564,7 @@ fn run() -> Result<()> {
         debug_assert!(r);
     }
 
+    // For tar archives, generate them now from the temporary directory.
     match args.format {
         OutputTarget::Tar => generate_tar_from(&*output_dir, &final_output_path, false)?,
         OutputTarget::TarZstd => generate_tar_from(&*output_dir, &final_output_path, true)?,
