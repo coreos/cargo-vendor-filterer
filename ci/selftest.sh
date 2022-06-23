@@ -11,20 +11,13 @@ cd ${tmp_git}
 # This exists right now, but we will test removing it
 hex_benches=vendor/hex/benches
 
-echo "Test errors"
-if cargo-vendor-filterer --platform=x86_64-unknown-linux-gnu --platform=aarch64-unknown-linux-gnu 2>err.txt; then
-    exit 1
-fi
-grep -q 'Specifying multiple targets is not currently supported' err.txt
-echo "ok errors"
-
 verify_no_windows() {
     test $(stat --printf="%s" vendor/winapi/src/lib.rs) = 0
     test $(ls vendor/winapi/src | wc -l) = 1
 }
 
 echo "Verifying linux"
-cargo-vendor-filterer --platform=x86_64-unknown-linux-gnu --exclude-crate-path='hex#benches'
+cargo-vendor-filterer --platform=x86_64-unknown-linux-gnu  --platform=aarch64-unknown-linux-gnu --exclude-crate-path='hex#benches'
 verify_no_windows
 test '!' -d "${hex_benches}"
 rm vendor -rf

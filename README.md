@@ -33,8 +33,8 @@ exclude-crate-paths = [ { name = "curl-sys", exclude = "curl" },
 ## Available options for for `package.metadata.vendor-filter` in Cargo.toml
 
 - `platforms`: List of rustc target triples; this is the same values accepted by
-  e.g. `cargo metadata --filter-platform`.  At the moment, only one exact platform can be specified
-  and wildcards are not supported.
+  e.g. `cargo metadata --filter-platform`.  You can specify multiple values, however
+  at the moment wildcards are not supported.
 - `all-features`: Enable all features of the current crate when vendoring.
 - `exclude-crate-paths`: Remove files and directories from target crates.  A key
   use case for this is removing the vendored copy of C libraries embedded in
@@ -59,13 +59,3 @@ This uses the suggested code from https://reproducible-builds.org/docs/archives/
 to output a reproducible archive; in other words, another process/tool
 can also perform a `git clone` of your project and regenerate the vendor
 tarball to verify it.
-
-# TODO
-
-We only support a single `--platform` right now, so if e.g.
-you use `--platform=x86_64-unknown-linux-gnu` and there's a crate
-dependency only set on e.g. `aarch64-unknown-linux-gnu`, it
-will be missing.
-
-A future enhancement will support something like 
-`--platform=*-unknown-linux-gnu --platform=wasm`.

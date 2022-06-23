@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
+use cargo_metadata::Package;
 use cargo_metadata::{CargoOpt::AllFeatures, MetadataCommand};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
@@ -377,6 +378,42 @@ fn generate_tar_from(srcdir: &Utf8Path, dest: &Utf8Path, zstd_compress: bool) ->
     Ok(())
 }
 
+fn add_packages_for_platform(
+    args: &Args,
+    config: &VendorFilter,
+    packages: &mut HashMap<cargo_metadata::PackageId, cargo_metadata::Package>,
+    platform: Option<&str>,
+) -> Result<()> {
+    let mut command = MetadataCommand::new();
+    if args.offline {
+        command.other_options(vec![OFFLINE.to_string()]);
+    }
+
+    if config.all_features.unwrap_or_default() {
+        command.features(AllFeatures);
+    }
+
+    if let Some(platform) = platform {
+        command.other_options(vec![format!("--filter-platform={platform}")]);
+    }
+    let meta = command.exec().context("Executing cargo metadata")?;
+    for package in meta.packages {
+        packages.insert(package.id.clone(), package);
+    }
+    Ok(())
+}
+
+fn get_root_package(args: &Args) -> Result<Option<Package>> {
+    let mut command = MetadataCommand::new();
+    if args.offline {
+        command.other_options(vec![OFFLINE.to_string()]);
+    }
+    command.no_deps();
+
+    let meta = command.exec().context("Executing cargo metadata")?;
+    Ok(meta.root_package().cloned())
+}
+
 /// An inner version of `main`; the primary code.
 fn run() -> Result<()> {
     let mut args = std::env::args().collect::<Vec<_>>();
@@ -405,7 +442,7 @@ fn run() -> Result<()> {
         .as_ref()
         .map(|td| td.path().try_into())
         .transpose()?;
-    let final_output_path = args.path.unwrap_or_else(|| {
+    let final_output_path = args.path.clone().unwrap_or_else(|| {
         match args.format {
             OutputTarget::Dir => VENDOR_DEFAULT_PATH,
             OutputTarget::Tar => VENDOR_DEFAULT_PATH_TAR,
@@ -420,30 +457,22 @@ fn run() -> Result<()> {
             _ => unreachable!(),
         });
 
-    let mut command = MetadataCommand::new();
-    if args.offline {
-        command.other_options(vec![OFFLINE.to_string()]);
-    }
-
-    if config.all_features.unwrap_or_default() {
-        command.features(AllFeatures);
-    }
-    // TODO: verify by cross checking all tier1 platforms that the dependency set is exactly
-    // the same.
-
-    let filter = match &config.platforms.as_deref() {
-        None | Some([]) => None,
-        Some([p]) => Some(p),
-        Some(_) => anyhow::bail!("Specifying multiple targets is not currently supported"),
-    };
-
-    let other_args = filter.map(|s| format!("--filter-platform={s}")).into_iter();
-    command.other_options(other_args.collect::<Vec<_>>());
-    let meta = command.exec().context("Executing cargo metadata")?;
-    let packages = &meta.packages;
-
     if output_dir.exists() {
         anyhow::bail!("Refusing to operate on extant directory: {}", output_dir);
+    }
+
+    let mut packages = HashMap::new();
+    let have_platform_filters = config
+        .platforms
+        .as_ref()
+        .map(|v| !v.is_empty())
+        .unwrap_or_default();
+    if have_platform_filters {
+        for platform in config.platforms.iter().flatten() {
+            add_packages_for_platform(&args, &config, &mut packages, Some(platform.as_str()))?;
+        }
+    } else {
+        add_packages_for_platform(&args, &config, &mut packages, None)?;
     }
 
     // Run `cargo vendor` which will capture all dependencies.
@@ -456,14 +485,14 @@ fn run() -> Result<()> {
         anyhow::bail!("Failed to execute cargo vendor: {:?}", status);
     }
 
-    let root = meta.root_package();
+    let root = get_root_package(&args)?;
 
     // Create a mapping of name -> [package versions]
     let mut pkgs_by_name = BTreeMap::<_, Vec<_>>::new();
-    for pkg in packages {
+    for pkg in packages.values() {
         let name = pkg.name.as_str();
         // Skip ourself
-        if let Some(root) = root {
+        if let Some(root) = root.as_ref() {
             if pkg.id == root.id {
                 continue;
             }
