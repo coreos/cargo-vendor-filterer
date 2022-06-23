@@ -50,7 +50,7 @@ echo "ok linux + output to tar"
 
 # Default
 cargo-vendor-filterer
-test -d "${hex_benches}"
+test -d vendor/"${hex_benches}"
 test $(stat --printf="%s" vendor/winapi/src/lib.rs) != 0
 rm vendor -rf
 echo "ok default"
@@ -64,3 +64,4 @@ rm vendor -rf
 echo "ok linux only via config"
 
 rm "${tmpd}" -rf
+echo "selftest succeeded"
