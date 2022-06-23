@@ -26,9 +26,9 @@ jobs:
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v1
       - name: Install vendor tool
-        run: cargo install cargo-vendor-filterer
+        run: cargo install --path .
       - name: Run
-        run: cargo check && cargo vendor-filterer --format=tar.zstd
+        run: cargo vendor-filterer --format=tar.zstd
       - uses: actions/upload-artifact@v3
         with:
           name: vendor.tar.zstd
