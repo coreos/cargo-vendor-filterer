@@ -3,7 +3,9 @@ use camino::{Utf8Path, Utf8PathBuf};
 use cargo_metadata::Package;
 use cargo_metadata::{CargoOpt::AllFeatures, MetadataCommand};
 use clap::Parser;
+use either::Either;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufReader, Write};
@@ -439,6 +441,65 @@ fn get_root_package(args: &Args) -> Result<Option<Package>> {
     Ok(meta.root_package().cloned())
 }
 
+/// Parse the output of `rustc --print target-list`
+fn get_target_list() -> Result<HashSet<String>> {
+    let o = Command::new("rustc")
+        .args(["--print", "target-list"])
+        .output()
+        .context("Failed to invoke rustc --print target-list")?;
+    let buf = String::from_utf8(o.stdout)?;
+    Ok(buf.lines().map(|s| s.trim().to_string()).collect())
+}
+
+type ParsedPlatform<'a> = SmallVec<[&'a str; 4]>;
+
+fn platform_matches(platform: &ParsedPlatform, o: &ParsedPlatform) -> bool {
+    if platform.len() != o.len() {
+        return false;
+    }
+    for (t, p) in platform.iter().zip(o.iter()) {
+        if *p == "*" {
+            continue;
+        }
+        if p != t {
+            return false;
+        }
+    }
+    true
+}
+
+fn expand_one_platform<'t>(
+    platform: &str,
+    target_list: &'t [(&str, ParsedPlatform)],
+) -> Vec<&'t str> {
+    let platform_parts: ParsedPlatform = platform.split('-').collect();
+    let mut r = Vec::new();
+    for (target, target_parts) in target_list {
+        if platform_matches(target_parts, &platform_parts) {
+            r.push(*target)
+        }
+    }
+    r
+}
+
+fn expand_platforms<'a, 'b>(
+    platforms: &'b [&'b str],
+    target_list: &'a [(&str, ParsedPlatform)],
+) -> Result<Vec<String>> {
+    let r = platforms
+        .iter()
+        .flat_map(|&platform| {
+            if platform.contains('*') {
+                Either::Left(expand_one_platform(platform, target_list).into_iter())
+            } else {
+                Either::Right([platform].into_iter())
+            }
+        })
+        .map(ToOwned::to_owned) // Clone to avoid need for common lifetimes
+        .collect();
+    Ok(r)
+}
+
 /// An inner version of `main`; the primary code.
 fn run() -> Result<()> {
     let mut args = std::env::args().collect::<Vec<_>>();
@@ -495,10 +556,25 @@ fn run() -> Result<()> {
         .as_ref()
         .map(|v| !v.is_empty())
         .unwrap_or_default();
+    let mut expanded_platforms = None;
     if have_platform_filters {
-        for platform in config.platforms.iter().flatten() {
-            add_packages_for_platform(&args, &config, &mut packages, Some(platform.as_str()))?;
+        println!("Gathering metadata for platforms");
+        let target_list = get_target_list()?;
+        let target_list: Vec<(&str, ParsedPlatform)> = target_list
+            .iter()
+            .map(|platform| (platform.as_str(), platform.split('-').collect()))
+            .collect();
+        let platforms: Vec<_> = config
+            .platforms
+            .iter()
+            .flatten()
+            .map(|s| s.as_str())
+            .collect();
+        let platforms = expand_platforms(&platforms, &target_list)?;
+        for platform in platforms.iter() {
+            add_packages_for_platform(&args, &config, &mut packages, Some(platform))?;
         }
+        expanded_platforms = Some(platforms);
     } else {
         add_packages_for_platform(&args, &config, &mut packages, None)?;
     }
@@ -637,7 +713,7 @@ fn run() -> Result<()> {
 
     if !had_config {
         eprintln!("Notice: No vendor filtering enabled");
-    } else if let Some(platforms) = config.platforms.as_deref() {
+    } else if let Some(platforms) = expanded_platforms {
         eprintln!("Filtered to target platforms: {:?}", platforms);
     }
 
@@ -670,4 +746,35 @@ fn test_parse_config() {
     let filter = json!({ "exclude-crate-paths": [ { "name": "hex", "exclude": "benches" }, { "name": "curl", "exclude": "curl" } ]});
     let r: VendorFilter = serde_json::from_value(filter).unwrap();
     assert_eq!(r.exclude_crate_paths.unwrap().len(), 2);
+}
+
+#[test]
+fn test_platforms() {
+    let targets = [
+        "powerpc64le-unknown-linux-gnu",
+        "x86_64-unknown-linux-gnux32",
+        "arm-linux-androideabi",
+        "x86_64-unknown-linux-gnu",
+        "mipsel-sony-psp",
+        "wasm32-wasi",
+        "x86_64-sun-solaris",
+    ];
+    let target_list: Vec<(&str, ParsedPlatform)> = targets
+        .iter()
+        .map(|platform| (*platform, platform.split('-').collect()))
+        .collect();
+    // Verify we pass through literals
+    for &target in targets.iter() {
+        let targets = [target];
+        let v = expand_platforms(targets.as_slice(), &target_list).unwrap();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0], target);
+    }
+
+    let linux_spec = ["*-unknown-linux-gnu"];
+    let mut linuxes = expand_platforms(&linux_spec, &target_list).unwrap();
+    linuxes.sort();
+    assert_eq!(linuxes.len(), 2);
+    assert_eq!(linuxes[0], "powerpc64le-unknown-linux-gnu");
+    assert_eq!(linuxes[1], "x86_64-unknown-linux-gnu");
 }
