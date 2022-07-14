@@ -363,8 +363,7 @@ fn git_source_date_epoch(dir: &Utf8Path) -> Result<u64> {
     if !o.status.success() {
         anyhow::bail!("git exited with an error: {:?}", o);
     }
-    let buf =
-        String::from_utf8(o.stdout).with_context(|| format!("Failed to parse git log output"))?;
+    let buf = String::from_utf8(o.stdout).context("Failed to parse git log output")?;
     let r = buf.trim().parse()?;
     Ok(r)
 }
@@ -400,7 +399,7 @@ fn generate_tar_from(srcdir: &Utf8Path, dest: &Utf8Path, compress: Compression) 
         .arg(format!("--mtime=@{source_date_epoch}"))
         .args(["-f", dest.as_str(), "."])
         .status()
-        .with_context(|| format!("Failed to execute tar"))?;
+        .context("Failed to execute tar")?;
     Ok(())
 }
 
@@ -615,7 +614,7 @@ fn run() -> Result<()> {
         }
 
         if let Some(excludes) = excludes.get(name) {
-            process_excludes(&pbuf, name, &excludes)?;
+            process_excludes(&pbuf, name, excludes)?;
         }
 
         let r = pbuf.pop();
