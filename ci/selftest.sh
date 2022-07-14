@@ -26,6 +26,13 @@ test '!' -d "${hex_benches}"
 rm target/vendor -rf
 echo "ok linux only"
 
+echo "Verifying linux"
+cargo-vendor-filterer '--platform=*-unknown-linux-gnu' target/vendor
+verify_no_windows target/vendor
+test '!' -d "${hex_benches}"
+rm target/vendor -rf
+echo "ok linux only via glob"
+
 echo "Verifying linux as subcommand"
 cargo vendor-filterer --platform=x86_64-unknown-linux-gnu
 verify_no_windows vendor

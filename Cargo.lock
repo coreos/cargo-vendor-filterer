@@ -58,10 +58,12 @@ dependencies = [
  "cargo-lock",
  "cargo_metadata",
  "clap",
+ "either",
  "hex",
  "openssl",
  "serde",
  "serde_json",
+ "smallvec",
  "tempfile",
  "toml",
 ]
@@ -127,6 +129,12 @@ checksum = "5538cd660450ebeb4234cfecf8f2284b844ffc4c50531e66d584ad5b91293613"
 dependencies = [
  "os_str_bytes",
 ]
+
+[[package]]
+name = "either"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f107b87b6afc2a64fd13cac55fe06d6c8859f12d4b14cbcdd2c67d0976781be"
 
 [[package]]
 name = "fastrand"
@@ -421,6 +429,12 @@ dependencies = [
  "ryu",
  "serde",
 ]
+
+[[package]]
+name = "smallvec"
+version = "1.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2fd0db749597d91ff862fd1d55ea87f7855a744a8425a64695b6fca237d1dad1"
 
 [[package]]
 name = "strsim"
