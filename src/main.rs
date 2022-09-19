@@ -558,7 +558,7 @@ fn run() -> Result<()> {
         .unwrap_or_default();
     let mut expanded_platforms = None;
     if have_platform_filters {
-        println!("Gathering metadata for platforms");
+        eprintln!("Gathering metadata for platforms");
         let target_list = get_target_list()?;
         let target_list: Vec<(&str, ParsedPlatform)> = target_list
             .iter()
