@@ -47,7 +47,9 @@ All of these options have corresponding CLI flags; see `cargo vendor-filterer --
 You can also provide `--format=tar.zstd` to output a reproducible tar archive
 compressed via zstd; the default filename will be `vendor.tar.zstd`.  Similarly
 there is `--format=tar.gz` for gzip, and `--format=tar` to output an uncompressed tar archive, which you
-can compress however you like.
+can compress however you like.  It's also strongly recommended to use `--prefix=vendor`
+which has less surprising behavior when unpacked in e.g. a home directory.  For example,
+`--prefix=vendor --format=tar.zstd` together.
 
 This option requires:
 

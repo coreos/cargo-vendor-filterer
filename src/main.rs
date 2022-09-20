@@ -169,6 +169,12 @@ struct Args {
     #[clap(long, value_parser, default_value = "dir")]
     format: OutputTarget,
 
+    /// The file path name to use when generating a tar stream.  It's suggested
+    /// to use `--prefix=vendor`; this is not the default only for backwards
+    /// compatibilty.
+    #[clap(long, value_parser)]
+    prefix: Option<Utf8PathBuf>,
+
     /// Run without accessing the network; this is passed down to e.g. `cargo metadata --offline`.
     #[clap(long)]
     offline: bool,
@@ -371,7 +377,12 @@ fn git_source_date_epoch(dir: &Utf8Path) -> Result<u64> {
 }
 
 /// Generate a reproducible tarball with optional zstd compression.
-fn generate_tar_from(srcdir: &Utf8Path, dest: &Utf8Path, compress: Compression) -> Result<()> {
+fn generate_tar_from(
+    srcdir: &Utf8Path,
+    dest: &Utf8Path,
+    prefix: Option<&Utf8Path>,
+    compress: Compression,
+) -> Result<()> {
     let envkey = "SOURCE_DATE_EPOCH";
     let source_date_epoch_env = std::env::var_os(envkey);
     let source_date_epoch_env = source_date_epoch_env
@@ -398,6 +409,7 @@ fn generate_tar_from(srcdir: &Utf8Path, dest: &Utf8Path, compress: Compression) 
             "--pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime",
         ])
         .args(compress.tar_switch())
+        .args(prefix.map(|prefix| format!("--transform=s,^.,./{prefix},")))
         .arg(format!("--mtime=@{source_date_epoch}"))
         .args(["-f", dest.as_str(), "."])
         .status()
@@ -698,17 +710,22 @@ fn run() -> Result<()> {
     }
 
     // For tar archives, generate them now from the temporary directory.
+    let prefix = args.prefix.as_deref();
     match args.format {
         OutputTarget::Tar => {
-            generate_tar_from(&*output_dir, &final_output_path, Compression::None)?
+            generate_tar_from(&*output_dir, &final_output_path, prefix, Compression::None)?
         }
         OutputTarget::TarGzip => {
-            generate_tar_from(&*output_dir, &final_output_path, Compression::Gzip)?
+            generate_tar_from(&*output_dir, &final_output_path, prefix, Compression::Gzip)?
         }
         OutputTarget::TarZstd => {
-            generate_tar_from(&*output_dir, &final_output_path, Compression::Zstd)?
+            generate_tar_from(&*output_dir, &final_output_path, prefix, Compression::Zstd)?
         }
-        OutputTarget::Dir => {}
+        OutputTarget::Dir => {
+            if prefix.is_some() {
+                anyhow::bail!("Cannot use --prefix with non-tar --format");
+            }
+        }
     };
 
     if !had_config {

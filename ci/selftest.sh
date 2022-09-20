@@ -43,9 +43,16 @@ echo "ok linux only subcommand"
 echo "Verifying linux + output to tar zstd"
 cargo vendor-filterer --platform=x86_64-unknown-linux-gnu --format=tar.zstd mycrate-5.2.7.tar.zstd
 zstdcat mycrate-5.2.7.tar.zstd | tar tf - > out.txt
-grep -qF './anyhow' out.txt
+grep -qEe '^./anyhow' out.txt
 rm -v mycrate-5.2.7.tar.zstd out.txt
 echo "ok linux + output to tar"
+
+echo "Verifying linux + output to --prefix=vendor tar zstd"
+cargo vendor-filterer --platform=x86_64-unknown-linux-gnu --prefix=vendor --format=tar.zstd mycrate-5.2.7.tar.zstd
+zstdcat mycrate-5.2.7.tar.zstd | tar tf - > out.txt
+grep -qEe '^./vendor/anyhow' out.txt
+rm -v mycrate-5.2.7.tar.zstd out.txt
+echo "ok linux + output to tar prefixed"
 
 echo "Verifying linux + output to tar"
 cargo vendor-filterer --platform=x86_64-unknown-linux-gnu --format=tar
