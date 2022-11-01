@@ -160,6 +160,10 @@ struct Args {
     #[clap(long)]
     exclude_crate_path: Option<Vec<String>>,
 
+    /// Path to Cargo.toml
+    #[clap(long, value_parser)]
+    manifest_path: Option<Utf8PathBuf>,
+
     /// Enable all features
     #[clap(long)]
     all_features: Option<bool>,
@@ -311,10 +315,7 @@ fn gather_config(args: &Args) -> Result<Option<VendorFilter>> {
         return Ok(Some(f));
     };
     // Otherwise gather from `package.metadata.vendor-filter` in Cargo.toml
-    let mut meta = MetadataCommand::new();
-    if args.offline {
-        meta.other_options(vec![OFFLINE.to_string()]);
-    }
+    let meta = new_metadata_cmd(args);
     let meta = meta
         .exec()
         .context("Executing cargo metadata (first run)")?;
@@ -417,16 +418,24 @@ fn generate_tar_from(
     Ok(())
 }
 
+fn new_metadata_cmd(args: &Args) -> MetadataCommand {
+    let mut command = MetadataCommand::new();
+    if args.offline {
+        command.other_options(vec![OFFLINE.to_string()]);
+    }
+    if let Some(path) = args.manifest_path.as_deref() {
+        command.manifest_path(path);
+    }
+    command
+}
+
 fn add_packages_for_platform(
     args: &Args,
     config: &VendorFilter,
     packages: &mut HashMap<cargo_metadata::PackageId, cargo_metadata::Package>,
     platform: Option<&str>,
 ) -> Result<()> {
-    let mut command = MetadataCommand::new();
-    if args.offline {
-        command.other_options(vec![OFFLINE.to_string()]);
-    }
+    let mut command = new_metadata_cmd(args);
 
     if config.all_features.unwrap_or_default() {
         command.features(AllFeatures);
@@ -443,10 +452,7 @@ fn add_packages_for_platform(
 }
 
 fn get_root_package(args: &Args) -> Result<Option<Package>> {
-    let mut command = MetadataCommand::new();
-    if args.offline {
-        command.other_options(vec![OFFLINE.to_string()]);
-    }
+    let mut command = new_metadata_cmd(args);
     command.no_deps();
 
     let meta = command.exec().context("Executing cargo metadata")?;
@@ -592,9 +598,14 @@ fn run() -> Result<()> {
     }
 
     // Run `cargo vendor` which will capture all dependencies.
+    let manifest_path = args
+        .manifest_path
+        .as_ref()
+        .map(|o| ["--manifest-path", o.as_str()]);
     let status = Command::new("cargo")
         .args(&["vendor"])
         .args(args.offline.then(|| OFFLINE))
+        .args(manifest_path.iter().flatten())
         .arg(&*output_dir)
         .status()?;
     if !status.success() {
