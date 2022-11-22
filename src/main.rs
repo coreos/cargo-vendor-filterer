@@ -33,7 +33,7 @@ const OFFLINE: &str = "--offline";
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct CargoChecksums {
     files: BTreeMap<String, String>,
-    package: String,
+    package: Option<String>,
 }
 
 /// The minimal bits of Cargo.toml we need.
@@ -774,6 +774,29 @@ fn test_parse_config() {
     let filter = json!({ "exclude-crate-paths": [ { "name": "hex", "exclude": "benches" }, { "name": "curl", "exclude": "curl" } ]});
     let r: VendorFilter = serde_json::from_value(filter).unwrap();
     assert_eq!(r.exclude_crate_paths.unwrap().len(), 2);
+}
+
+#[test]
+fn test_parse_checksums() {
+    use serde_json::json;
+
+    let valid = vec![
+        json!({
+          "files": {
+            "src/lib.rs": "af7f3c1dc4a7612f3519b812f8d6f9298f0f8af2e999ee3a23e6e9a5ddce5d75",
+          },
+          "package": null
+        }),
+        json!({
+          "files": {
+            "src/lib.rs": "af7f3c1dc4a7612f3519b812f8d6f9298f0f8af2e999ee3a23e6e9a5ddce5d75",
+          },
+          "package": "433cfd6710c9986c576a25ca913c39d66a6474107b406f34f91d4a8923395241"
+        }),
+    ];
+    for case in valid {
+        let _: CargoChecksums = serde_json::from_value(case).unwrap();
+    }
 }
 
 #[test]
