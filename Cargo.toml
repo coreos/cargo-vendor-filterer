@@ -31,3 +31,6 @@ either = "1.7.0"
 [dependencies.clap]
 features = ["derive"]
 version = "3.2"
+
+[features]
+vendored-openssl = ["openssl/vendored"]
