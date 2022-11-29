@@ -624,13 +624,8 @@ fn run() -> Result<()> {
                 continue;
             }
         }
-        // Also skip anything not from crates.io
-        if pkg
-            .source
-            .as_ref()
-            .filter(|source| source.is_crates_io())
-            .is_none()
-        {
+        // Also skip anything local
+        if pkg.source.as_ref().is_none() {
             eprintln!("Skipping {name}");
             continue;
         }
