@@ -398,7 +398,7 @@ fn generate_tar_from(
         git_source_date_epoch(Utf8Path::new(".")).map(|v| Cow::Owned(v.to_string()))
     })?;
 
-    Command::new("tar")
+    let status = Command::new("tar")
         .args(&[
             "-c",
             "-C",
@@ -415,6 +415,9 @@ fn generate_tar_from(
         .args(["-f", dest.as_str(), "."])
         .status()
         .context("Failed to execute tar")?;
+    if !status.success() {
+        anyhow::bail!("tar failed: {status:?}");
+    }
     Ok(())
 }
 
