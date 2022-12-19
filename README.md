@@ -30,6 +30,9 @@ exclude-crate-paths = [ { name = "curl-sys", exclude = "curl" },
                       ]
 ```
 
+For workspaces, use the corresponding [workspace metadata](https://doc.rust-lang.org/cargo/reference/workspaces.html#the-metadata-table)
+key `workspace.metadata.vendor-filter`.
+
 ## Available options for for `package.metadata.vendor-filter` in Cargo.toml
 
 - `platforms`: List of rustc target triples; this is the same values accepted by

@@ -319,9 +319,11 @@ fn gather_config(args: &Args) -> Result<Option<VendorFilter>> {
     let meta = meta
         .exec()
         .context("Executing cargo metadata (first run)")?;
-    meta.root_package()
-        .and_then(|r| VendorFilter::parse_json(&r.metadata).transpose())
-        .transpose()
+    if let Some(root) = meta.root_package() {
+        VendorFilter::parse_json(&root.metadata)
+    } else {
+        VendorFilter::parse_json(&meta.workspace_metadata)
+    }
 }
 
 /// Given a crate, remove matching files/directories in excludes.
