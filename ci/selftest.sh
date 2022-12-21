@@ -61,7 +61,6 @@ grep -qF './anyhow' out.txt
 rm -v vendor.tar out.txt
 echo "ok linux + output to tar"
 
-
 # Default
 cargo-vendor-filterer
 test -d vendor/"${hex_benches}"
@@ -76,6 +75,11 @@ verify_no_windows vendor
 test '!' -d "${hex_benches}"
 rm vendor -rf
 echo "ok linux only via config"
+
+cargo add local-encoding@0.2.0
+cargo-vendor-filterer
+rm vendor -rf
+echo "ok path dependencies"
 
 rm "${tmpd}" -rf
 echo "selftest succeeded"
