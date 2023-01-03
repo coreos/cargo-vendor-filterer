@@ -22,7 +22,7 @@ jobs:
           toolchain: stable
           components: rustfmt, rust-src
       - name: Cache Dependencies
-        uses: Swatinem/rust-cache@v1
+        uses: Swatinem/rust-cache@v2
       - name: Install vendor tool
         run: cargo install --path .
       - name: Run
