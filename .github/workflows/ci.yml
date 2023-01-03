@@ -21,11 +21,9 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
-          profile: minimal
-          override: true
           components: rustfmt, rust-src
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v1
@@ -39,4 +37,3 @@ jobs:
         run: cargo install --path . --debug
       - name: Self test integration
         run: ./ci/selftest.sh
-
