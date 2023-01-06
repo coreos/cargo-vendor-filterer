@@ -16,24 +16,52 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  tests:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@v1
-        with:
-          toolchain: stable
-          components: rustfmt, rust-src
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
-        with:
-          key: "tests"
-      - name: Build
+      - name: Compile (no features)
         run: cargo test --no-run
-      - name: Run tests
-        run: cargo test -- --nocapture --quiet
+      - name: Compile (all features)
+        run: cargo test --no-run --all-features
+      - name: Test
+        run: cargo test --all-features -- --nocapture --quiet
       - name: Install
         run: cargo install --path . --debug
+      - name: Upload binary
+        uses: actions/upload-artifact@v2
+        with:
+          name: cargo-vendor-filterer
+          path: target/debug/cargo-vendor-filterer
       - name: Self test integration
         run: ./ci/selftest.sh
+  # Verify that we can successfully vendor selected crates
+  test-crates:
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      matrix:
+        repos: 
+          - "nushell/nushell@0.73.0"
+    steps:
+      - name: Download binary
+        uses: actions/download-artifact@v2
+        with:
+          name: cargo-vendor-filterer
+      - run: sudo install -m 0755 cargo-vendor-filterer /usr/bin
+      - run: |
+          r="${{ matrix.repos }}"
+          parts=(${r//@/ })
+          echo repo=${parts[0]} >> $GITHUB_ENV
+          echo tag=${parts[1]} >> $GITHUB_ENV
+      - uses: actions/checkout@v3
+        with:
+          repository: ${{ env.repo }}
+          ref: ${{ env.tag }}
+      - run: mkdir -p .cargo && cargo-vendor-filterer --platform x86_64-unknown-linux-gnu --all-features true > .cargo/config.toml
+      # This runs without networking, verifying we're building using vendored deps
+      - run: rm ~/.cargo/{registry,git} -rf && unshare -Umn cargo check --offline
