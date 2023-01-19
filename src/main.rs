@@ -540,7 +540,8 @@ fn run() -> Result<()> {
 
     let tempdir = match args.format {
         OutputTarget::Tar | OutputTarget::TarGzip | OutputTarget::TarZstd => {
-            Some(tempfile::tempdir_in(".")?)
+            let target_basedir = args.path.as_ref().and_then(|p| p.parent());
+            Some(tempfile::tempdir_in(target_basedir.unwrap_or(".".into()))?)
         }
         OutputTarget::Dir => None,
     };
