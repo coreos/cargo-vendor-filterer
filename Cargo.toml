@@ -6,7 +6,7 @@ name = "cargo-vendor-filterer"
 version = "0.5.8"
 description = "`cargo vendor`, but with filtering for platforms and more"
 readme = "README.md"
-repository = "https://github.com/cgwalters/cargo-vendor-filterer"
+repository = "https://github.com/coreos/cargo-vendor-filterer"
 
 #### Example configuration to filter to platform
 ### [package.metadata.vendor-filter]
