@@ -105,12 +105,12 @@ impl clap::ValueEnum for OutputTarget {
         &[Self::Dir, Self::Tar, Self::TarGzip, Self::TarZstd]
     }
 
-    fn to_possible_value<'a>(&self) -> Option<clap::PossibleValue<'a>> {
+    fn to_possible_value<'a>(&self) -> Option<clap::builder::PossibleValue> {
         match self {
-            Self::Dir => Some(clap::PossibleValue::new("dir")),
-            Self::Tar => Some(clap::PossibleValue::new("tar")),
-            Self::TarGzip => Some(clap::PossibleValue::new("tar.gz")),
-            Self::TarZstd => Some(clap::PossibleValue::new("tar.zstd")),
+            Self::Dir => Some(clap::builder::PossibleValue::new("dir")),
+            Self::Tar => Some(clap::builder::PossibleValue::new("tar")),
+            Self::TarGzip => Some(clap::builder::PossibleValue::new("tar.gz")),
+            Self::TarZstd => Some(clap::builder::PossibleValue::new("tar.zstd")),
         }
     }
 }
@@ -145,14 +145,13 @@ struct VendorFilter {
     exclude_crate_paths: Option<Vec<CrateExclude>>,
 }
 
-/// Enhanced `cargo vendor` with filtering
 #[derive(Parser, Debug)]
-#[clap(author, version, about, long_about = None)]
+#[command(version, about)]
 struct Args {
     /// Only include crates for these targets.
     ///
     /// For example, `x86_64-unknown-linux-gnu`.
-    #[clap(long)]
+    #[arg(long)]
     platform: Option<Vec<String>>,
 
     /// Remove files/subdirectories in crates that match an exact path.
@@ -166,30 +165,30 @@ struct Args {
     /// from the `curl-sys` crate.
     ///
     /// Nonexistent paths will emit a warning, but are not currently an error.
-    #[clap(long)]
+    #[arg(long)]
     exclude_crate_path: Option<Vec<String>>,
 
     /// Path to Cargo.toml
-    #[clap(long, value_parser)]
+    #[arg(long)]
     manifest_path: Option<Utf8PathBuf>,
 
     /// Enable all features
-    #[clap(long)]
+    #[arg(long)]
     all_features: Option<bool>,
 
     /// Pick the output format; the only currently available option is `dir`,
     /// which writes to a directory.  The default value is `vendor`.
-    #[clap(long, value_parser, default_value = "dir")]
+    #[arg(long, default_value = "dir")]
     format: OutputTarget,
 
     /// The file path name to use when generating a tar stream.  It's suggested
     /// to use `--prefix=vendor`; this is not the default only for backwards
     /// compatibilty.
-    #[clap(long, value_parser)]
+    #[arg(long)]
     prefix: Option<Utf8PathBuf>,
 
     /// Run without accessing the network; this is passed down to e.g. `cargo metadata --offline`.
-    #[clap(long)]
+    #[arg(long)]
     offline: bool,
 
     /// The output path
@@ -249,7 +248,7 @@ fn replace_with_stub(path: &Utf8Path) -> Result<()> {
     // cargo checksum list.
     let mut writef = |target: &Utf8Path, contents: &[u8]| {
         let fullpath = path.join(target);
-        std::fs::write(&fullpath, contents)?;
+        std::fs::write(fullpath, contents)?;
         let digest = openssl::hash::hash(openssl::hash::MessageDigest::sha256(), contents)?;
         let digest = hex::encode(digest);
         checksums.files.insert(target.to_string(), digest);
@@ -363,7 +362,7 @@ fn process_excludes(path: &Utf8PathBuf, name: &str, excludes: &[&str]) -> Result
 /// Return the timestamp of the latest git commit in seconds since the Unix epoch.
 fn git_source_date_epoch(dir: &Utf8Path) -> Result<u64> {
     let o = Command::new("git")
-        .args(&["log", "-1", "--pretty=%ct"])
+        .args(["log", "-1", "--pretty=%ct"])
         .current_dir(dir)
         .output()?;
     if !o.status.success() {
@@ -396,7 +395,7 @@ fn generate_tar_from(
     })?;
 
     let status = Command::new("tar")
-        .args(&[
+        .args([
             "-c",
             "-C",
             srcdir.as_str(),
@@ -541,7 +540,9 @@ fn run() -> Result<()> {
     let tempdir = match args.format {
         OutputTarget::Tar | OutputTarget::TarGzip | OutputTarget::TarZstd => {
             let target_basedir = args.path.as_ref().and_then(|p| p.parent());
-            Some(tempfile::tempdir_in(target_basedir.unwrap_or(".".into()))?)
+            Some(tempfile::tempdir_in(
+                target_basedir.unwrap_or_else(|| ".".into()),
+            )?)
         }
         OutputTarget::Dir => None,
     };
@@ -604,8 +605,8 @@ fn run() -> Result<()> {
         .as_ref()
         .map(|o| ["--manifest-path", o.as_str()]);
     let status = Command::new("cargo")
-        .args(&["vendor"])
-        .args(args.offline.then(|| OFFLINE))
+        .args(["vendor"])
+        .args(args.offline.then_some(OFFLINE))
         .args(manifest_path.iter().flatten())
         .arg(&*output_dir)
         .status()?;
@@ -719,13 +720,13 @@ fn run() -> Result<()> {
     let prefix = args.prefix.as_deref();
     match args.format {
         OutputTarget::Tar => {
-            generate_tar_from(&*output_dir, &final_output_path, prefix, Compression::None)?
+            generate_tar_from(&output_dir, &final_output_path, prefix, Compression::None)?
         }
         OutputTarget::TarGzip => {
-            generate_tar_from(&*output_dir, &final_output_path, prefix, Compression::Gzip)?
+            generate_tar_from(&output_dir, &final_output_path, prefix, Compression::Gzip)?
         }
         OutputTarget::TarZstd => {
-            generate_tar_from(&*output_dir, &final_output_path, prefix, Compression::Zstd)?
+            generate_tar_from(&output_dir, &final_output_path, prefix, Compression::Zstd)?
         }
         OutputTarget::Dir => {
             if prefix.is_some() {
@@ -862,4 +863,10 @@ name = "somebench"
     for &k in UNWANTED_MANIFEST_KEYS {
         assert!(!t.contains_key(k));
     }
+}
+
+#[test]
+fn test_cli() {
+    use clap::CommandFactory;
+    Args::command().debug_assert()
 }
