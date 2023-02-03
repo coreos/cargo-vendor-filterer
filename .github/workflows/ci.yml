@@ -14,6 +14,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  ACTIONS_LINTS_TOOLCHAIN: 1.66.0
 
 jobs:
   build:
@@ -39,6 +40,19 @@ jobs:
           path: target/debug/cargo-vendor-filterer
       - name: Self test integration
         run: ./ci/selftest.sh
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: ${{ env.ACTIONS_LINTS_TOOLCHAIN }}
+          components: clippy
+      - name: Cache Dependencies
+        uses: Swatinem/rust-cache@v2
+      - name: Clippy
+        run: cargo clippy -- -D warnings
   # Verify that we can successfully vendor selected crates
   test-crates:
     runs-on: ubuntu-latest

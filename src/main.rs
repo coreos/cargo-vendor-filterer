@@ -249,7 +249,7 @@ fn replace_with_stub(path: &Utf8Path) -> Result<()> {
     // cargo checksum list.
     let mut writef = |target: &Utf8Path, contents: &[u8]| {
         let fullpath = path.join(target);
-        std::fs::write(&fullpath, contents)?;
+        std::fs::write(fullpath, contents)?;
         let digest = openssl::hash::hash(openssl::hash::MessageDigest::sha256(), contents)?;
         let digest = hex::encode(digest);
         checksums.files.insert(target.to_string(), digest);
@@ -363,7 +363,7 @@ fn process_excludes(path: &Utf8PathBuf, name: &str, excludes: &[&str]) -> Result
 /// Return the timestamp of the latest git commit in seconds since the Unix epoch.
 fn git_source_date_epoch(dir: &Utf8Path) -> Result<u64> {
     let o = Command::new("git")
-        .args(&["log", "-1", "--pretty=%ct"])
+        .args(["log", "-1", "--pretty=%ct"])
         .current_dir(dir)
         .output()?;
     if !o.status.success() {
@@ -396,7 +396,7 @@ fn generate_tar_from(
     })?;
 
     let status = Command::new("tar")
-        .args(&[
+        .args([
             "-c",
             "-C",
             srcdir.as_str(),
@@ -541,7 +541,9 @@ fn run() -> Result<()> {
     let tempdir = match args.format {
         OutputTarget::Tar | OutputTarget::TarGzip | OutputTarget::TarZstd => {
             let target_basedir = args.path.as_ref().and_then(|p| p.parent());
-            Some(tempfile::tempdir_in(target_basedir.unwrap_or(".".into()))?)
+            Some(tempfile::tempdir_in(
+                target_basedir.unwrap_or_else(|| ".".into()),
+            )?)
         }
         OutputTarget::Dir => None,
     };
@@ -604,8 +606,8 @@ fn run() -> Result<()> {
         .as_ref()
         .map(|o| ["--manifest-path", o.as_str()]);
     let status = Command::new("cargo")
-        .args(&["vendor"])
-        .args(args.offline.then(|| OFFLINE))
+        .args(["vendor"])
+        .args(args.offline.then_some(OFFLINE))
         .args(manifest_path.iter().flatten())
         .arg(&*output_dir)
         .status()?;
@@ -719,13 +721,13 @@ fn run() -> Result<()> {
     let prefix = args.prefix.as_deref();
     match args.format {
         OutputTarget::Tar => {
-            generate_tar_from(&*output_dir, &final_output_path, prefix, Compression::None)?
+            generate_tar_from(&output_dir, &final_output_path, prefix, Compression::None)?
         }
         OutputTarget::TarGzip => {
-            generate_tar_from(&*output_dir, &final_output_path, prefix, Compression::Gzip)?
+            generate_tar_from(&output_dir, &final_output_path, prefix, Compression::Gzip)?
         }
         OutputTarget::TarZstd => {
-            generate_tar_from(&*output_dir, &final_output_path, prefix, Compression::Zstd)?
+            generate_tar_from(&output_dir, &final_output_path, prefix, Compression::Zstd)?
         }
         OutputTarget::Dir => {
             if prefix.is_some() {
