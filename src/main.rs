@@ -105,12 +105,12 @@ impl clap::ValueEnum for OutputTarget {
         &[Self::Dir, Self::Tar, Self::TarGzip, Self::TarZstd]
     }
 
-    fn to_possible_value<'a>(&self) -> Option<clap::PossibleValue<'a>> {
+    fn to_possible_value<'a>(&self) -> Option<clap::builder::PossibleValue> {
         match self {
-            Self::Dir => Some(clap::PossibleValue::new("dir")),
-            Self::Tar => Some(clap::PossibleValue::new("tar")),
-            Self::TarGzip => Some(clap::PossibleValue::new("tar.gz")),
-            Self::TarZstd => Some(clap::PossibleValue::new("tar.zstd")),
+            Self::Dir => Some(clap::builder::PossibleValue::new("dir")),
+            Self::Tar => Some(clap::builder::PossibleValue::new("tar")),
+            Self::TarGzip => Some(clap::builder::PossibleValue::new("tar.gz")),
+            Self::TarZstd => Some(clap::builder::PossibleValue::new("tar.zstd")),
         }
     }
 }
@@ -145,9 +145,8 @@ struct VendorFilter {
     exclude_crate_paths: Option<Vec<CrateExclude>>,
 }
 
-/// Enhanced `cargo vendor` with filtering
 #[derive(Parser, Debug)]
-#[clap(author, version, about, long_about = None)]
+#[clap(version, about)]
 struct Args {
     /// Only include crates for these targets.
     ///
