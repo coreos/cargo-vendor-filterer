@@ -146,12 +146,12 @@ struct VendorFilter {
 }
 
 #[derive(Parser, Debug)]
-#[clap(version, about)]
+#[command(version, about)]
 struct Args {
     /// Only include crates for these targets.
     ///
     /// For example, `x86_64-unknown-linux-gnu`.
-    #[clap(long)]
+    #[arg(long)]
     platform: Option<Vec<String>>,
 
     /// Remove files/subdirectories in crates that match an exact path.
@@ -165,30 +165,30 @@ struct Args {
     /// from the `curl-sys` crate.
     ///
     /// Nonexistent paths will emit a warning, but are not currently an error.
-    #[clap(long)]
+    #[arg(long)]
     exclude_crate_path: Option<Vec<String>>,
 
     /// Path to Cargo.toml
-    #[clap(long, value_parser)]
+    #[arg(long)]
     manifest_path: Option<Utf8PathBuf>,
 
     /// Enable all features
-    #[clap(long)]
+    #[arg(long)]
     all_features: Option<bool>,
 
     /// Pick the output format; the only currently available option is `dir`,
     /// which writes to a directory.  The default value is `vendor`.
-    #[clap(long, value_parser, default_value = "dir")]
+    #[arg(long, default_value = "dir")]
     format: OutputTarget,
 
     /// The file path name to use when generating a tar stream.  It's suggested
     /// to use `--prefix=vendor`; this is not the default only for backwards
     /// compatibilty.
-    #[clap(long, value_parser)]
+    #[arg(long)]
     prefix: Option<Utf8PathBuf>,
 
     /// Run without accessing the network; this is passed down to e.g. `cargo metadata --offline`.
-    #[clap(long)]
+    #[arg(long)]
     offline: bool,
 
     /// The output path
