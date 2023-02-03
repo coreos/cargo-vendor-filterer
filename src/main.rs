@@ -865,3 +865,9 @@ name = "somebench"
         assert!(!t.contains_key(k));
     }
 }
+
+#[test]
+fn test_cli() {
+    use clap::CommandFactory;
+    Args::command().debug_assert()
+}
