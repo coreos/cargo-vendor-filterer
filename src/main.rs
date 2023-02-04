@@ -176,8 +176,7 @@ struct Args {
     #[arg(long)]
     all_features: Option<bool>,
 
-    /// Pick the output format; the only currently available option is `dir`,
-    /// which writes to a directory.  The default value is `vendor`.
+    /// Pick the output format.
     #[arg(long, default_value = "dir")]
     format: OutputTarget,
 
