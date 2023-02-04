@@ -148,7 +148,7 @@ struct VendorFilter {
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Args {
-    /// Only include crates for these targets.
+    /// Only include crates for these targets ('*' wildcards are supported).
     ///
     /// For example, `x86_64-unknown-linux-gnu`.
     #[arg(long)]
