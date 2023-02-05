@@ -36,8 +36,8 @@ key `workspace.metadata.vendor-filter`.
 ## Available options for for `package.metadata.vendor-filter` in Cargo.toml
 
 - `platforms`: List of rustc target triples; this is the same values accepted by
-  e.g. `cargo metadata --filter-platform`.  You can specify multiple values, however
-  at the moment wildcards are not supported.
+  e.g. `cargo metadata --filter-platform`.  You can specify multiple values,
+  and `*` wildcards are supported.
 - `all-features`: Enable all features of the current crate when vendoring.
 - `exclude-crate-paths`: Remove files and directories from target crates.  A key
   use case for this is removing the vendored copy of C libraries embedded in

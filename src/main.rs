@@ -148,7 +148,7 @@ struct VendorFilter {
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Args {
-    /// Only include crates for these targets.
+    /// Only include crates for these targets ('*' wildcards are supported).
     ///
     /// For example, `x86_64-unknown-linux-gnu`.
     #[arg(long)]
@@ -176,8 +176,7 @@ struct Args {
     #[arg(long)]
     all_features: Option<bool>,
 
-    /// Pick the output format; the only currently available option is `dir`,
-    /// which writes to a directory.  The default value is `vendor`.
+    /// Pick the output format.
     #[arg(long, default_value = "dir")]
     format: OutputTarget,
 
