@@ -29,6 +29,7 @@ serde_json = "1.0.80"
 tempfile = "3.3.0"
 smallvec = "1.9.0"
 either = "1.7.0"
+itertools = "0.10.5"
 
 [features]
 vendored-openssl = ["openssl/vendored"]

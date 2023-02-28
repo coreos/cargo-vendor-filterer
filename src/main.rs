@@ -1,9 +1,10 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Chain, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use cargo_metadata::Package;
-use cargo_metadata::{CargoOpt::AllFeatures, MetadataCommand};
+use cargo_metadata::{CargoOpt::AllFeatures, Metadata, MetadataCommand};
 use clap::Parser;
 use either::Either;
+use itertools;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::borrow::Cow;
@@ -116,7 +117,7 @@ impl clap::ValueEnum for OutputTarget {
 }
 
 /// Exclude a file/directory from a crate.
-#[derive(PartialEq, Eq, Deserialize, Debug)]
+#[derive(PartialEq, Eq, Deserialize, Debug, Hash, Clone)]
 #[serde(rename_all = "kebab-case")]
 struct CrateExclude {
     name: String,
@@ -140,9 +141,9 @@ impl CrateExclude {
 #[derive(PartialEq, Eq, Deserialize, Debug, Default)]
 #[serde(rename_all = "kebab-case")]
 struct VendorFilter {
-    platforms: Option<Vec<String>>,
+    platforms: Option<HashSet<String>>,
     all_features: Option<bool>,
-    exclude_crate_paths: Option<Vec<CrateExclude>>,
+    exclude_crate_paths: Option<HashSet<CrateExclude>>,
 }
 
 #[derive(Parser, Debug)]
@@ -192,6 +193,10 @@ struct Args {
 
     /// The output path
     path: Option<Utf8PathBuf>,
+
+    /// Additional `Cargo.toml` to sync and vendor
+    #[arg(short, long, value_name = "TOML")]
+    sync: Option<Vec<Utf8PathBuf>>,
 }
 
 fn filter_manifest(manifest: &mut toml::Value) {
@@ -265,6 +270,26 @@ fn replace_with_stub(path: &Utf8Path) -> Result<()> {
     Ok(())
 }
 
+trait Combine<T> {
+    fn combine<F>(self, other: Self, f: F) -> Self
+    where
+        F: FnOnce(T, T) -> T;
+}
+
+impl<T> Combine<T> for Option<T> {
+    fn combine<F>(self, other: Self, f: F) -> Self
+    where
+        F: FnOnce(T, T) -> T,
+    {
+        match (self, other) {
+            (Some(a), Some(b)) => Some(f(a, b)),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            _ => None,
+        }
+    }
+}
+
 impl VendorFilter {
     /// Parse a value from `package.metadata.vendor-filter`.
     fn parse_json(meta: &serde_json::Value) -> Result<Option<Self>> {
@@ -299,6 +324,49 @@ impl VendorFilter {
         });
         Ok(r)
     }
+
+    /// Merges multiple filters into one by combining their `platforms`, taking
+    /// the or of their `all_features`, and combining their `exclude_crate_paths`
+    fn merge<'a, T>(filters: T) -> Option<Self>
+    where
+        T: IntoIterator<Item = &'a Self>,
+    {
+        let vf = Self {
+            platforms: None,
+            all_features: None,
+            exclude_crate_paths: None,
+        };
+        let vf = filters.into_iter().fold(vf, |acc, e| {
+            acc.platforms = acc.platforms.combine(e.platforms, |a, b| &a | &b);
+            // TODO: Should you prefer to enable all features if any toml has the option set?
+            acc.all_features = acc.all_features.combine(e.all_features, |a, b| a || b);
+            acc.exclude_crate_paths = acc
+                .exclude_crate_paths
+                .combine(e.exclude_crate_paths, |a, b| &a | &b);
+            acc
+        });
+        // If any of the values have been set, then emit a VendorFilter
+        match (vf.platforms, vf.all_features, vf.exclude_crate_paths) {
+            _ => Some(vf),
+            (None, None, None) => None,
+        }
+    }
+}
+
+/// Create an iterator over all Cargo.toml
+fn paths_to_tomls(args: &Args) -> impl Iterator<Item = &Utf8PathBuf> {
+    args.manifest_path.iter().chain(args.sync.iter().flatten())
+}
+
+/// For a given Cargo.toml, attempt to find the VendorFilter configuration
+fn gather_config_from_toml(toml: &Utf8PathBuf, offline: bool) -> Result<Option<VendorFilter>> {
+    let meta = new_metadata_cmd(toml, offline)
+        .exec()
+        .context(format!("Executing cargo metadata for {p} on first run"))?;
+    match meta.root_package() {
+        Some(root) => VendorFilter::parse_json(&root.metadata),
+        None => VendorFilter::parse_json(&meta.workspace_metadata),
+    }
 }
 
 /// Process CLI arguments into a filter.
@@ -307,16 +375,12 @@ fn gather_config(args: &Args) -> Result<Option<VendorFilter>> {
     if let Some(f) = VendorFilter::parse_args(args)? {
         return Ok(Some(f));
     };
-    // Otherwise gather from `package.metadata.vendor-filter` in Cargo.toml
-    let meta = new_metadata_cmd(args);
-    let meta = meta
-        .exec()
-        .context("Executing cargo metadata (first run)")?;
-    if let Some(root) = meta.root_package() {
-        VendorFilter::parse_json(&root.metadata)
-    } else {
-        VendorFilter::parse_json(&meta.workspace_metadata)
-    }
+
+    // Otherwise gather from `package.metadata.vendor-filter` in the manifest
+    // and sync'd Cargo.toml files
+    let filters = paths_to_tomls(args).map(|p| gather_config_from_toml(p, args.offline));
+    let filters = itertools::process_results(filters, |iter| iter.filter_map(|vf| vf.as_ref()))?;
+    Ok(VendorFilter::merge(filters))
 }
 
 /// Given a crate, remove matching files/directories in excludes.
@@ -416,14 +480,12 @@ fn generate_tar_from(
     Ok(())
 }
 
-fn new_metadata_cmd(args: &Args) -> MetadataCommand {
+fn new_metadata_cmd(path: &Utf8Path, offline: bool) -> MetadataCommand {
     let mut command = MetadataCommand::new();
-    if args.offline {
+    if offline {
         command.other_options(vec![OFFLINE.to_string()]);
     }
-    if let Some(path) = args.manifest_path.as_deref() {
-        command.manifest_path(path);
-    }
+    command.manifest_path(path);
     command
 }
 
