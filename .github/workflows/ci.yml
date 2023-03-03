@@ -38,8 +38,6 @@ jobs:
         with:
           name: cargo-vendor-filterer
           path: target/debug/cargo-vendor-filterer
-      - name: Self test integration
-        run: ./ci/selftest.sh
   clippy:
     runs-on: ubuntu-latest
     steps:

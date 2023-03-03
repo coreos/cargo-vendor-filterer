@@ -92,6 +92,7 @@ dependencies = [
  "clap",
  "either",
  "hex",
+ "once_cell",
  "openssl",
  "serde",
  "serde_json",

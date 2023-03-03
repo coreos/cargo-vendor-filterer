@@ -51,7 +51,8 @@ impl Tier {
         match self {
             Tier::One => either::Left(TIER1.iter()),
             Tier::Two => either::Right(TIER1.iter().chain(TIER2.iter())),
-        }.copied()
+        }
+        .copied()
     }
 }
 
