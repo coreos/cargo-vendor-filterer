@@ -516,6 +516,44 @@ fn expand_platforms<'a, 'b>(
     Ok(r)
 }
 
+/// Deletes unreferenced packages from the vendor directory.
+fn delete_unreferenced_packages(
+    output_dir: &Utf8Path,
+    package_filenames: &BTreeMap<String, &Package>,
+    excludes: &HashMap<&str, Vec<&str>>,
+) -> Result<()> {
+    // A reusable buffer (silly optimization to avoid allocating lots of path buffers)
+    let mut pbuf = Utf8PathBuf::from(&output_dir);
+    let mut unreferenced = HashSet::new();
+
+    // Deleting files while iterating a `read_dir` produces undefined behaviour.
+    let mut entries = Vec::new();
+    for entry in output_dir.read_dir_utf8()? {
+        entries.push(entry?);
+    }
+
+    // Find and physically delete unreferenced packages, and apply filters.
+    for entry in entries {
+        let name = entry.file_name();
+        pbuf.push(name);
+
+        if !package_filenames.contains_key(name) {
+            replace_with_stub(&pbuf).with_context(|| format!("Replacing with stub: {name}"))?;
+            eprintln!("Replacing unreferenced package with stub: {name}");
+            assert!(unreferenced.insert(name.to_string()));
+        }
+
+        if let Some(excludes) = excludes.get(name) {
+            process_excludes(&pbuf, name, excludes)?;
+        }
+
+        let r = pbuf.pop();
+        debug_assert!(r);
+    }
+
+    Ok(())
+}
+
 /// An inner version of `main`; the primary code.
 fn run() -> Result<()> {
     let mut args = std::env::args().collect::<Vec<_>>();
@@ -691,29 +729,7 @@ fn run() -> Result<()> {
             Ok::<_, anyhow::Error>(m)
         })?;
 
-    // A reusable buffer (silly optimization to avoid allocating lots of path buffers)
-    let mut pbuf = Utf8PathBuf::from(&*output_dir);
-    let mut unreferenced = HashSet::new();
-
-    // Find and physically delete unreferenced packages, and apply filters.
-    for entry in output_dir.read_dir_utf8()? {
-        let entry = entry?;
-        let name = entry.file_name();
-        pbuf.push(name);
-
-        if !package_filenames.contains_key(name) {
-            replace_with_stub(&pbuf).with_context(|| format!("Replacing with stub: {name}"))?;
-            eprintln!("Replacing unreferenced package with stub: {name}");
-            assert!(unreferenced.insert(name.to_string()));
-        }
-
-        if let Some(excludes) = excludes.get(name) {
-            process_excludes(&pbuf, name, excludes)?;
-        }
-
-        let r = pbuf.pop();
-        debug_assert!(r);
-    }
+    delete_unreferenced_packages(&output_dir, &package_filenames, &excludes)?;
 
     // For tar archives, generate them now from the temporary directory.
     let prefix = args.prefix.as_deref();
