@@ -40,7 +40,7 @@ dependencies = [
 
 [[package]]
 name = "cargo-vendor-filterer"
-version = "0.5.8"
+version = "0.5.9"
 dependencies = [
  "anyhow",
  "camino",
