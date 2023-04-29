@@ -13,8 +13,8 @@ hex_benches=hex/benches
 
 verify_no_windows() {
     (cd $1
-     test $(stat --printf="%s" winapi/src/lib.rs) = 0
-     test $(ls winapi/src | wc -l) = 1
+     test $(stat --printf="%s" windows-sys/src/lib.rs) = 0
+     test $(ls windows-sys/src | wc -l) = 1
     )
 }
 
@@ -64,7 +64,7 @@ echo "ok linux + output to tar"
 # Default
 cargo-vendor-filterer
 test -d vendor/"${hex_benches}"
-test $(stat --printf="%s" vendor/winapi/src/lib.rs) != 0
+test $(stat --printf="%s" vendor/windows-sys/src/lib.rs) != 0
 rm vendor -rf
 echo "ok default"
 
