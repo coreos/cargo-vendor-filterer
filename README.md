@@ -17,12 +17,21 @@ for example this will drop out crates like `winapi-x86_64-pc-windows-gnu` and
 $ cargo vendor-filterer --platform=x86_64-unknown-linux-gnu
 ```
 
+You may instead want to filter by tiers:
+
+```
+$ cargo vendor-filterer --tier=2
+```
+
+Currently this will drop out crates such as `redox_syscall`.
+
 You can also declaratively specify the desired vendor configuration via the [Cargo metadata](https://doc.rust-lang.org/cargo/reference/manifest.html#the-metadata-table)
-key `package.metadata.vendor-filter`:
+key `package.metadata.vendor-filter`.  In this example, we include only tier 1 and 2 Linux platforms, and additionally remove some vendored C sources:
 
 ```
 [package.metadata.vendor-filter]
-platforms = ["x86_64-unknown-linux-gnu"]
+platforms = ["*-unknown-linux-gnu"]
+tier = "2"
 all-features = true
 exclude-crate-paths = [ { name = "curl-sys", exclude = "curl" },
                         { name = "libz-sys", exclude = "src/zlib" },
@@ -37,7 +46,8 @@ key `workspace.metadata.vendor-filter`.
 
 - `platforms`: List of rustc target triples; this is the same values accepted by
   e.g. `cargo metadata --filter-platform`.  You can specify multiple values,
-  and `*` wildcards are supported.
+  and `*` wildcards are supported.  For example, `*-unknown-linux-gnu`.
+- `tier`: This can be either "1" or "2".  It may be specified in addition to `platforms`.
 - `all-features`: Enable all features of the current crate when vendoring.
 - `exclude-crate-paths`: Remove files and directories from target crates.  A key
   use case for this is removing the vendored copy of C libraries embedded in
