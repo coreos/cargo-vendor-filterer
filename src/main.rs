@@ -12,6 +12,8 @@ use std::io::{BufReader, Write};
 use std::process::Command;
 use std::vec;
 
+mod tiers;
+
 /// The path we use in Cargo.toml i.e. `package.metadata.vendor-filter`
 const CONFIG_KEY: &str = "vendor-filter";
 /// The name of our binary
@@ -141,6 +143,7 @@ impl CrateExclude {
 #[serde(rename_all = "kebab-case")]
 struct VendorFilter {
     platforms: Option<Vec<String>>,
+    tier: Option<tiers::Tier>,
     all_features: Option<bool>,
     exclude_crate_paths: Option<Vec<CrateExclude>>,
 }
@@ -153,6 +156,10 @@ struct Args {
     /// For example, `x86_64-unknown-linux-gnu`.
     #[arg(long)]
     platform: Option<Vec<String>>,
+
+    /// Limit platforms to the provided tier ("1" or "2").
+    #[arg(long, value_parser)]
+    tier: Option<tiers::Tier>,
 
     /// Remove files/subdirectories in crates that match an exact path.
     ///
@@ -266,6 +273,16 @@ fn replace_with_stub(path: &Utf8Path) -> Result<()> {
 }
 
 impl VendorFilter {
+    /// Returns true if this configuration will filter by platform
+    fn enables_platform_filtering(&self) -> bool {
+        self.tier.is_some()
+            || self
+                .platforms
+                .as_ref()
+                .map(|v| !v.is_empty())
+                .unwrap_or_default()
+    }
+
     /// Parse a value from `package.metadata.vendor-filter`.
     fn parse_json(meta: &serde_json::Value) -> Result<Option<Self>> {
         let meta = meta.as_object().and_then(|o| o.get(CONFIG_KEY));
@@ -281,6 +298,7 @@ impl VendorFilter {
     /// Parse the subset of CLI arguments that affect vendor content into a filter.
     fn parse_args(args: &Args) -> Result<Option<Self>> {
         let args_unset = args.platform.is_none()
+            && args.tier.is_none()
             && args.all_features.is_none()
             && args.exclude_crate_path.is_none();
         let exclude_crate_paths = args
@@ -294,6 +312,7 @@ impl VendorFilter {
             .transpose()?;
         let r = (!args_unset).then(|| Self {
             platforms: args.platform.clone(),
+            tier: args.tier.clone(),
             all_features: args.all_features,
             exclude_crate_paths,
         });
@@ -458,13 +477,17 @@ fn get_root_package(args: &Args) -> Result<Option<Package>> {
 }
 
 /// Parse the output of `rustc --print target-list`
-fn get_target_list() -> Result<HashSet<String>> {
-    let o = Command::new("rustc")
-        .args(["--print", "target-list"])
-        .output()
-        .context("Failed to invoke rustc --print target-list")?;
-    let buf = String::from_utf8(o.stdout)?;
-    Ok(buf.lines().map(|s| s.trim().to_string()).collect())
+fn get_target_list(tier: Option<&tiers::Tier>) -> Result<HashSet<String>> {
+    if let Some(tier) = tier {
+        Ok(tier.targets().map(|v| v.to_string()).collect())
+    } else {
+        let o = Command::new("rustc")
+            .args(["--print", "target-list"])
+            .output()
+            .context("Failed to invoke rustc --print target-list")?;
+        let buf = String::from_utf8(o.stdout)?;
+        Ok(buf.lines().map(|s| s.trim().to_string()).collect())
+    }
 }
 
 type ParsedPlatform<'a> = SmallVec<[&'a str; 4]>;
@@ -608,26 +631,25 @@ fn run() -> Result<()> {
     }
 
     let mut packages = HashMap::new();
-    let have_platform_filters = config
-        .platforms
-        .as_ref()
-        .map(|v| !v.is_empty())
-        .unwrap_or_default();
     let mut expanded_platforms = None;
-    if have_platform_filters {
+    if config.enables_platform_filtering() {
         eprintln!("Gathering metadata for platforms");
-        let target_list = get_target_list()?;
+        let target_list = get_target_list(config.tier.as_ref())?;
         let target_list: Vec<(&str, ParsedPlatform)> = target_list
             .iter()
             .map(|platform| (platform.as_str(), platform.split('-').collect()))
             .collect();
-        let platforms: Vec<_> = config
-            .platforms
-            .iter()
-            .flatten()
-            .map(|s| s.as_str())
-            .collect();
-        let platforms = expand_platforms(&platforms, &target_list)?;
+        // If the user provided an explicit platform list, it may have globs.  Expand it with the known target list.
+        let platforms: Vec<_> = if let Some(platforms) = config.platforms.as_ref() {
+            let platforms: Vec<_> = platforms.iter().map(|s| s.as_str()).collect();
+            expand_platforms(&platforms, &target_list)?
+        } else {
+            // Here the user didn't provide a platform list; we're just filtering by tier.
+            assert!(config.tier.is_some());
+            let mut v: Vec<_> = target_list.into_iter().map(|v| v.0.to_string()).collect();
+            v.sort();
+            v
+        };
         for platform in platforms.iter() {
             add_packages_for_platform(&args, &config, &mut packages, Some(platform))?;
         }
