@@ -12,33 +12,9 @@ use std::io::{BufReader, Write};
 use std::process::Command;
 use std::vec;
 
-mod tiers;
+use cargo_vendor_filterer::*;
 
-/// The path we use in Cargo.toml i.e. `package.metadata.vendor-filter`
-const CONFIG_KEY: &str = "vendor-filter";
-/// The name of our binary
-const SELF_NAME: &str = "vendor-filterer";
-/// The default directory path
-const VENDOR_DEFAULT_PATH: &str = "vendor";
-/// The default path for --format=tar
-const VENDOR_DEFAULT_PATH_TAR: &str = "vendor.tar";
-/// The default path for --format=tar.zstd
-const VENDOR_DEFAULT_PATH_TAR_ZSTD: &str = "vendor.tar.zstd";
-/// The default path for --format=tar.gz
-const VENDOR_DEFAULT_PATH_TAR_GZ: &str = "vendor.tar.gz";
-/// The name of the Cargo.toml file
-const CARGO_TOML: &str = "Cargo.toml";
-/// The filename cargo writes in packages with file checksums
-const CARGO_CHECKSUM: &str = ".cargo-checksum.json";
-/// The CLI argument passed to cargo to work offline
-const OFFLINE: &str = "--offline";
-/// The package entry
-const MANIFEST_KEY_PACKAGE: &str = "package";
-/// Extra targets which we need to remove because Cargo validates them and will
-/// error out when we've replaced the library with a stub.
-const UNWANTED_MANIFEST_KEYS: &[&str] = &["bin", "example", "test", "bench"];
-/// Cargo also checks these keys in the package section
-const UNWANTED_PACKAGE_KEYS: &[&str] = &["links", "build"];
+mod tiers;
 
 /// This is the .cargo-checksum.json in a crate/package.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

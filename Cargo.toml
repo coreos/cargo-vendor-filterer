@@ -32,3 +32,6 @@ either = "1.7.0"
 
 [features]
 vendored-openssl = ["openssl/vendored"]
+
+[dev-dependencies]
+once_cell = "1.17.1"
