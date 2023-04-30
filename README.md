@@ -64,13 +64,11 @@ can compress however you like.  It's also strongly recommended to use `--prefix=
 which has less surprising behavior when unpacked in e.g. a home directory.  For example,
 `--prefix=vendor --format=tar.zstd` together.
 
-This option requires:
+This option requires `SOURCE_DATE_EPOCH` set in the environment, or an external `git` and the working directory must be a git repository.
 
- - An external GNU `tar` program
- - An external `gzip` or `zstd` program (for `--format=tar.gz` and `--format=tar.zstd` respectively)
- - `SOURCE_DATE_EPOCH` set in the environment, or an external `git` and the working directory must be a git repository
+With `--format=tar.zstd`, this currently requires an external `zstd` binary.
 
-This uses the suggested code from https://reproducible-builds.org/docs/archives/
+This uses the suggested logic from https://reproducible-builds.org/docs/archives/
 to output a reproducible archive; in other words, another process/tool
 can also perform a `git clone` of your project and regenerate the vendor
-tarball to verify it.
+tarball using the same version of `cargo vendor-filterer` to verify it.

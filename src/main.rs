@@ -50,11 +50,13 @@ enum Compression {
 }
 
 impl Compression {
-    fn tar_switch(&self) -> Option<&'static str> {
+    fn supported(&self) -> bool {
         match self {
-            Compression::None => None,
-            Compression::Gzip => Some("--gzip"),
-            Compression::Zstd => Some("--zstd"),
+            Compression::None | Compression::Gzip => true,
+            Compression::Zstd => {
+                // For now, assume Unix systems have an external `zstd` binary
+                cfg!(not(windows))
+            }
         }
     }
 }
@@ -391,6 +393,8 @@ fn generate_tar_from(
     prefix: Option<&Utf8Path>,
     compress: Compression,
 ) -> Result<()> {
+    const GZIP_MTIME: u32 = 0;
+    const GZIP_COMPRESSION: u32 = 6; // default level of the CLI
     let envkey = "SOURCE_DATE_EPOCH";
     let source_date_epoch_env = std::env::var_os(envkey);
     let source_date_epoch_env = source_date_epoch_env
@@ -404,27 +408,74 @@ fn generate_tar_from(
     let source_date_epoch = source_date_epoch_env.map(Ok).unwrap_or_else(|| {
         git_source_date_epoch(Utf8Path::new(".")).map(|v| Cow::Owned(v.to_string()))
     })?;
+    let timestamp: u64 = source_date_epoch.parse()?;
 
-    let status = Command::new("tar")
-        .args([
-            "-c",
-            "-C",
-            srcdir.as_str(),
-            "--sort=name",
-            "--owner=0",
-            "--group=0",
-            "--numeric-owner",
-            "--pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime",
-        ])
-        .args(compress.tar_switch())
-        .args(prefix.map(|prefix| format!("--transform=s,^.,./{prefix},")))
-        .arg(format!("--mtime=@{source_date_epoch}"))
-        .args(["-f", dest.as_str(), "."])
-        .status()
-        .context("Failed to execute tar")?;
-    if !status.success() {
-        anyhow::bail!("tar failed: {status:?}");
+    let output = std::fs::File::create(dest)?;
+    let mut helper = None;
+    let output: Box<dyn Write> = match compress {
+        Compression::None => Box::new(output),
+        Compression::Gzip => Box::new(
+            flate2::GzBuilder::new()
+                .mtime(GZIP_MTIME)
+                .write(output, flate2::Compression::new(GZIP_COMPRESSION)),
+        ),
+        Compression::Zstd => {
+            let mut subhelper = Command::new("zstd");
+            subhelper.stdin(std::process::Stdio::piped());
+            subhelper.stdout(output);
+            let mut subhelper = subhelper.spawn()?;
+            let o = subhelper.stdin.take().unwrap();
+            helper = Some(subhelper);
+            Box::new(o)
+        }
+    };
+    let output = std::io::BufWriter::new(output);
+    let mut archive = tar::Builder::new(output);
+
+    for entry in walkdir::WalkDir::new(srcdir).sort_by_file_name() {
+        let entry = entry?;
+        let path = entry.path();
+        let subpath = path.strip_prefix(srcdir)?;
+        let subpath = if let Some(p) = camino::Utf8Path::from_path(subpath) {
+            let p = prefix
+                .map(|prefix| Cow::Owned(prefix.join(p)))
+                .unwrap_or(Cow::Borrowed(p));
+            Utf8Path::new("./").join(&*p)
+        } else {
+            anyhow::bail!("Invalid non-UTF8 path: {path:?}");
+        };
+        let metadata = path.symlink_metadata()?;
+        let mut h = tar::Header::new_gnu();
+        h.set_metadata_in_mode(&metadata, tar::HeaderMode::Deterministic);
+        h.set_mtime(timestamp);
+        h.set_uid(0);
+        h.set_gid(0);
+        h.set_cksum();
+        if metadata.is_dir() {
+            archive.append_data(&mut h, subpath, std::io::Cursor::new([]))?;
+        } else if metadata.is_file() {
+            let src = std::fs::File::open(path).map(std::io::BufReader::new)?;
+            archive.append_data(&mut h, subpath, src)?;
+        } else if metadata.is_symlink() {
+            let target = path.read_link()?;
+            archive.append_link(&mut h, subpath, target)?;
+        } else {
+            eprintln!("Ignoring unexpected special file: {path:?}");
+            continue;
+        }
     }
+
+    let mut output = archive.into_inner()?;
+    output.flush()?;
+    drop(output);
+
+    if let Some(mut helper) = helper {
+        let st = helper.wait()?;
+        if !st.success() {
+            anyhow::bail!("Compression program for {compress:?} failed: {st:?}");
+        }
+    }
+
     Ok(())
 }
 
@@ -590,10 +641,13 @@ fn run() -> Result<()> {
         eprintln!("NOTE: No vendor filtering enabled");
     }
 
-    #[cfg(windows)]
-    match args.format {
-        OutputTarget::Dir => {}
-        o => anyhow::bail!("Output format {o:?} is not supported on this platform"),
+    let compression = match args.format {
+        OutputTarget::Tar | OutputTarget::Dir => Compression::None,
+        OutputTarget::TarGzip => Compression::Gzip,
+        OutputTarget::TarZstd => Compression::Zstd,
+    };
+    if !compression.supported() {
+        anyhow::bail!("Compression format {compression:?} is not supported on this platform");
     }
 
     let tempdir = match args.format {
@@ -755,14 +809,8 @@ fn run() -> Result<()> {
     // For tar archives, generate them now from the temporary directory.
     let prefix = args.prefix.as_deref();
     match args.format {
-        OutputTarget::Tar => {
-            generate_tar_from(&output_dir, &final_output_path, prefix, Compression::None)?
-        }
-        OutputTarget::TarGzip => {
-            generate_tar_from(&output_dir, &final_output_path, prefix, Compression::Gzip)?
-        }
-        OutputTarget::TarZstd => {
-            generate_tar_from(&output_dir, &final_output_path, prefix, Compression::Zstd)?
+        OutputTarget::Tar | OutputTarget::TarGzip | OutputTarget::TarZstd => {
+            generate_tar_from(&output_dir, &final_output_path, prefix, compression)?
         }
         OutputTarget::Dir => {
             if prefix.is_some() {
