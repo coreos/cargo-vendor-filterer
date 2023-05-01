@@ -30,16 +30,19 @@ fn basic_tar_test(format: VendorFormat) {
 }
 
 #[test]
+#[cfg(not(windows))]
 fn tar() {
     basic_tar_test(VendorFormat::Tar);
 }
 
 #[test]
+#[cfg(not(windows))]
 fn tar_gz() {
     basic_tar_test(VendorFormat::TarGz);
 }
 
 #[test]
+#[cfg(not(windows))]
 fn tar_zstd() {
     basic_tar_test(VendorFormat::TarZstd);
 }
