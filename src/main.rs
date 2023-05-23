@@ -847,6 +847,8 @@ fn test_parse_config() {
     let valid = vec![
         json!({}),
         json!({ "platforms": ["aarch64-unknown-linux-gnu"]}),
+        json!({ "platforms": ["*-unknown-linux-gnu"], "tier": "2"}),
+        json!({ "platforms": ["*-unknown-linux-gnu"], "tier": "Two"}),
         json!({ "platforms": ["aarch64-unknown-linux-gnu"], "all-features": true}),
     ];
     for case in valid {
