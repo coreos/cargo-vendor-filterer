@@ -24,19 +24,23 @@ fn basic_tar_test(format: VendorFormat) {
         ..Default::default()
     })
     .unwrap();
+    if !output.status.success() {
+        let _ = std::io::copy(
+            &mut std::io::Cursor::new(output.stderr),
+            &mut std::io::stderr().lock(),
+        );
+    }
     assert!(output.status.success());
     assert!(test_folder.exists());
     assert!(test_folder.is_file());
 }
 
 #[test]
-#[cfg(not(windows))]
 fn tar() {
     basic_tar_test(VendorFormat::Tar);
 }
 
 #[test]
-#[cfg(not(windows))]
 fn tar_gz() {
     basic_tar_test(VendorFormat::TarGz);
 }
