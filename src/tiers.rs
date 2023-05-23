@@ -41,7 +41,9 @@ const TIER2: &[&str] = &[
 /// There is a third tier, but this API is about limited/curated tiers.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub(crate) enum Tier {
+    #[serde(alias = "1")]
     One,
+    #[serde(alias = "2")]
     Two,
 }
 
