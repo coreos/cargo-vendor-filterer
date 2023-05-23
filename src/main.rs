@@ -197,6 +197,7 @@ fn filter_manifest(manifest: &mut toml::Value) {
 
 /// Compute the SHA-256 digest of the buffer and return the result in hexadecimal format
 fn sha256_hexdigest(buf: &[u8]) -> Result<String> {
+    // NOTE: Keep this in sync with the copy in the tests
     #[cfg(not(windows))]
     {
         let digest = openssl::hash::hash(openssl::hash::MessageDigest::sha256(), buf)?;

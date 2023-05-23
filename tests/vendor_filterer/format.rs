@@ -1,4 +1,5 @@
 use super::common::{tempdir, vendor, VendorFormat, VendorOptions};
+use anyhow::Result;
 
 #[test]
 fn folder() {
@@ -13,6 +14,25 @@ fn folder() {
     assert!(output.status.success());
     assert!(test_folder.exists());
     assert!(test_folder.is_dir());
+}
+
+/// Compute the SHA-256 digest of the buffer and return the result in hexadecimal format
+fn sha256_hexdigest(buf: &[u8]) -> Result<String> {
+    // NOTE: Keep this in sync with the copy in the main binary
+    #[cfg(not(windows))]
+    {
+        let digest = openssl::hash::hash(openssl::hash::MessageDigest::sha256(), buf)?;
+        Ok(hex::encode(digest))
+    }
+    #[cfg(windows)]
+    {
+        // This is a pure-Rust implementation which avoids the openssl dependency on Windows.
+        // However, it may make sense here to add something like native-tls to the ecosystem
+        // except for sha digests?  On Windows I'm sure there's a core crypto library for this.
+        use sha2::Digest;
+        let digest = sha2::Sha256::digest(buf);
+        Ok(hex::encode(digest))
+    }
 }
 
 fn basic_tar_test(format: VendorFormat) {
@@ -33,6 +53,25 @@ fn basic_tar_test(format: VendorFormat) {
     assert!(output.status.success());
     assert!(test_folder.exists());
     assert!(test_folder.is_file());
+    let contents = std::fs::read(&test_folder).unwrap();
+    let original_digest = sha256_hexdigest(&contents).unwrap();
+    drop(contents);
+    std::fs::remove_file(&test_folder).unwrap();
+    let output = vendor(VendorOptions {
+        output: Some(&test_folder),
+        format: Some(format),
+        ..Default::default()
+    })
+    .unwrap();
+    if !output.status.success() {
+        let _ = std::io::copy(
+            &mut std::io::Cursor::new(output.stderr),
+            &mut std::io::stderr().lock(),
+        );
+    }
+    let contents = std::fs::read(&test_folder).unwrap();
+    let rerun_digest = sha256_hexdigest(&contents).unwrap();
+    assert_eq!(&original_digest, &rerun_digest);
 }
 
 #[test]
