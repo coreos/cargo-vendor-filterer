@@ -111,6 +111,7 @@ dependencies = [
  "once_cell",
  "openssl",
  "serde",
+ "serde_ignored",
  "serde_json",
  "sha2",
  "smallvec",
@@ -583,6 +584,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "serde_ignored"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94eb4a4087ba8bdf14a9208ac44fddbf55c01a6195f7edfc511ddaff6cae45a6"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

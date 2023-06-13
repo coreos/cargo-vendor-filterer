@@ -287,7 +287,13 @@ impl VendorFilter {
         } else {
             return Ok(None);
         };
-        let v: Self = serde_json::from_value(meta.clone())?;
+        let mut unused = std::collections::BTreeSet::new();
+        let v: Self = serde_ignored::deserialize(meta.clone(), |path| {
+            unused.insert(path.to_string());
+        })?;
+        for k in unused {
+            eprintln!("warning: Unknown key {k} in metadata.{CONFIG_KEY}")
+        }
         Ok(Some(v))
     }
 
