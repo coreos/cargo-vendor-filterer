@@ -497,23 +497,47 @@ fn new_metadata_cmd(args: &Args) -> MetadataCommand {
     command
 }
 
-fn add_packages_for_platform(
-    args: &Args,
-    config: &VendorFilter,
-    packages: &mut HashMap<cargo_metadata::PackageId, cargo_metadata::Package>,
-    platform: Option<&str>,
-) -> Result<()> {
+fn new_metadata_cmd_with_config(args: &Args, config: &VendorFilter) -> MetadataCommand {
     let mut command = new_metadata_cmd(args);
-
     if config.all_features.unwrap_or_default() {
         command.features(AllFeatures);
     }
+    command
+}
+
+fn get_unfiltered_packages(
+    args: &Args,
+    config: &VendorFilter,
+) -> Result<HashMap<cargo_metadata::PackageId, cargo_metadata::Package>> {
+    let command = new_metadata_cmd_with_config(args, config);
+    let meta = command.exec().context("Executing cargo metadata")?;
+    Ok(meta
+        .packages
+        .into_iter()
+        .map(|pkg| (pkg.id.clone(), pkg))
+        .collect())
+}
+
+/// Using the filter configuration, add references to the `packages` map that
+/// point into the `all_packages` set we already have (to avoid duplicating memory).
+fn add_packages_for_platform<'p>(
+    args: &Args,
+    config: &VendorFilter,
+    all_packages: &'p HashMap<cargo_metadata::PackageId, cargo_metadata::Package>,
+    packages: &mut HashMap<cargo_metadata::PackageId, &'p cargo_metadata::Package>,
+    platform: Option<&str>,
+) -> Result<()> {
+    let mut command = new_metadata_cmd_with_config(args, config);
 
     if let Some(platform) = platform {
         command.other_options(vec![format!("--filter-platform={platform}")]);
     }
     let meta = command.exec().context("Executing cargo metadata")?;
     for package in meta.packages {
+        let package = all_packages
+            .get(&package.id)
+            .ok_or_else(|| anyhow!("Failed to find package {}", package.name))
+            .unwrap();
         packages.insert(package.id.clone(), package);
     }
     Ok(())
@@ -593,7 +617,7 @@ fn expand_platforms<'a, 'b>(
 /// Deletes unreferenced packages from the vendor directory.
 fn delete_unreferenced_packages(
     output_dir: &Utf8Path,
-    package_filenames: &BTreeMap<String, &Package>,
+    package_filenames: &BTreeMap<Cow<'_, str>, &Package>,
     excludes: &HashMap<&str, Vec<&str>>,
 ) -> Result<()> {
     // A reusable buffer (silly optimization to avoid allocating lots of path buffers)
@@ -611,7 +635,7 @@ fn delete_unreferenced_packages(
         let name = entry.file_name();
         pbuf.push(name);
 
-        if !package_filenames.contains_key(name) {
+        if !package_filenames.contains_key(&Cow::Borrowed(name)) {
             replace_with_stub(&pbuf).with_context(|| format!("Replacing with stub: {name}"))?;
             eprintln!("Replacing unreferenced package with stub: {name}");
             assert!(unreferenced.insert(name.to_string()));
@@ -626,6 +650,11 @@ fn delete_unreferenced_packages(
     }
 
     Ok(())
+}
+
+/// Return the filename cargo vendor would use for a package which has multiple versions present
+fn package_versioned_filename(p: &Package) -> String {
+    format!("{}-{}", p.name, p.version)
 }
 
 /// An inner version of `main`; the primary code.
@@ -690,6 +719,33 @@ fn run() -> Result<()> {
         anyhow::bail!("Refusing to operate on extant directory: {}", output_dir);
     }
 
+    eprintln!("Gathering metadata");
+    // We need to gather the full, unfiltered metadata to canonically know what
+    // `cargo vendor` will do.
+    let all_packages = get_unfiltered_packages(&args, &config)?;
+    let root = get_root_package(&args)?;
+
+    // Create a mapping of name -> [package versions]
+    let mut pkgs_by_name = BTreeMap::<_, Vec<_>>::new();
+    for pkg in all_packages.values() {
+        let name = pkg.name.as_str();
+        // Skip ourself
+        if let Some(root) = root.as_ref() {
+            if pkg.id == root.id {
+                continue;
+            }
+        }
+        // Also skip anything local
+        if pkg.source.as_ref().is_none() {
+            eprintln!("Skipping {name}");
+            continue;
+        }
+
+        let v = pkgs_by_name.entry(name).or_default();
+        v.push(pkg);
+    }
+
+    // And now do the filtered set
     let mut packages = HashMap::new();
     let mut expanded_platforms = None;
     if config.enables_platform_filtering() {
@@ -711,11 +767,17 @@ fn run() -> Result<()> {
             v
         };
         for platform in platforms.iter() {
-            add_packages_for_platform(&args, &config, &mut packages, Some(platform))?;
+            add_packages_for_platform(
+                &args,
+                &config,
+                &all_packages,
+                &mut packages,
+                Some(platform),
+            )?;
         }
         expanded_platforms = Some(platforms);
     } else {
-        add_packages_for_platform(&args, &config, &mut packages, None)?;
+        add_packages_for_platform(&args, &config, &all_packages, &mut packages, None)?;
     }
 
     // Run `cargo vendor` which will capture all dependencies.
@@ -733,67 +795,23 @@ fn run() -> Result<()> {
         anyhow::bail!("Failed to execute cargo vendor: {:?}", status);
     }
 
-    let root = get_root_package(&args)?;
-
-    // Create a mapping of name -> [package versions]
-    let mut pkgs_by_name = BTreeMap::<_, Vec<_>>::new();
-    for pkg in packages.values() {
-        let name = pkg.name.as_str();
-        // Skip ourself
-        if let Some(root) = root.as_ref() {
-            if pkg.id == root.id {
-                continue;
-            }
-        }
-        // Also skip anything local
-        if pkg.source.as_ref().is_none() {
-            eprintln!("Skipping {name}");
-            continue;
-        }
-
-        let v = pkgs_by_name.entry(name).or_default();
-        let name_version = format!("{name}-{}", pkg.version);
-        v.push((name_version, pkg));
-    }
-
-    // Split pkgs_by_name into ones that actually have multiple versions or not.
-    let mut unversioned_packages = BTreeMap::new();
-    let mut multiversioned_packages = BTreeMap::new();
-    for (name, versions) in pkgs_by_name {
-        let mut versions = versions.into_iter().peekable();
-        let first = versions.next().unwrap();
-        if versions.peek().is_some() {
-            for (version, pkg) in std::iter::once(first).chain(versions) {
-                multiversioned_packages.insert(version, pkg);
-            }
-        } else {
-            assert!(unversioned_packages.insert(name, first.1).is_none());
-        }
-    }
-
+    // Determine the set of vendored components we want to keep, by intersecting
+    // the all_packages map with the filtered one, returning an index by the
+    // directory name that will have been generated by `cargo vendor`.
     let mut package_filenames = BTreeMap::new();
-    for (name, pkg) in unversioned_packages {
-        let name_path = output_dir.join(name);
-        if !name_path.exists() {
-            anyhow::bail!("Failed to find vendored dependency: {name}");
-        }
-        package_filenames.insert(name.to_string(), pkg);
-    }
+    for (_name, mut pkgs) in pkgs_by_name {
+        // Reverse sort - greater version is lower index
+        pkgs.sort_by(|a, b| b.version.cmp(&a.version));
+        // SAFETY: The package set must be non-empty
+        let (first, rest) = pkgs.split_first().unwrap();
 
-    // When writing out packages that have multiple versions, `cargo vendor`
-    // appears to use an algorithm where the first (or highest version?)
-    // is just $name, then all other versions end up as $name-$version.
-    // We build up a map of those here to their original package.
-    for (namever, pkg) in multiversioned_packages {
-        let name = &pkg.name;
-        let namever_path = output_dir.join(&namever);
-        let name_path = output_dir.join(name);
-        if namever_path.exists() {
-            package_filenames.insert(namever, pkg);
-        } else if name_path.exists() {
-            package_filenames.insert(pkg.name.to_string(), pkg);
-        } else {
-            anyhow::bail!("Failed to find vendored dependency: {namever}");
+        if packages.contains_key(&first.id) {
+            package_filenames.insert(Cow::Borrowed(first.name.as_str()), *first);
+        }
+        for &pkg in rest {
+            if packages.contains_key(&pkg.id) {
+                package_filenames.insert(Cow::Owned(package_versioned_filename(pkg)), pkg);
+            }
         }
     }
 
