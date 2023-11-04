@@ -16,6 +16,8 @@ pub const CARGO_TOML: &str = "Cargo.toml";
 pub const CARGO_CHECKSUM: &str = ".cargo-checksum.json";
 /// The CLI argument passed to cargo to work offline
 pub const OFFLINE: &str = "--offline";
+/// The CLI argument passed to `cargo vendor` to respect override of the `crates.io` source when downloading crates
+pub const RESPECT_SOURCE_CONFIG: &str = "--respect-source-config";
 /// The package entry
 pub const MANIFEST_KEY_PACKAGE: &str = "package";
 /// Extra targets which we need to remove because Cargo validates them and will
