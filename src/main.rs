@@ -175,6 +175,12 @@ struct Args {
     #[arg(long)]
     offline: bool,
 
+    /// Instead of ignoring [source] configuration by default in `.cargo/config.toml` read it and
+    /// use it when downloading crates from crates.io, for example
+    /// ; this is passed down to e.g. `cargo vendor --respect-source-config`.
+    #[arg(long)]
+    respect_source_config: bool,
+
     /// The output path
     path: Option<Utf8PathBuf>,
 }
@@ -788,6 +794,7 @@ fn run() -> Result<()> {
     let status = Command::new("cargo")
         .args(["vendor"])
         .args(args.offline.then_some(OFFLINE))
+        .args(args.respect_source_config.then_some(RESPECT_SOURCE_CONFIG))
         .args(manifest_path.iter().flatten())
         .arg(&*output_dir)
         .status()?;
