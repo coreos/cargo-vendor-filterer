@@ -96,7 +96,7 @@ impl clap::ValueEnum for OutputTarget {
 }
 
 /// Exclude a file/directory from a crate.
-#[derive(PartialEq, Eq, Deserialize, Debug)]
+#[derive(PartialEq, Eq, Deserialize, Debug, Hash, Clone)]
 #[serde(rename_all = "kebab-case")]
 struct CrateExclude {
     name: String,
@@ -120,10 +120,10 @@ impl CrateExclude {
 #[derive(PartialEq, Eq, Deserialize, Debug, Default)]
 #[serde(rename_all = "kebab-case")]
 struct VendorFilter {
-    platforms: Option<Vec<String>>,
+    platforms: Option<HashSet<String>>,
     tier: Option<tiers::Tier>,
     all_features: Option<bool>,
-    exclude_crate_paths: Option<Vec<CrateExclude>>,
+    exclude_crate_paths: Option<HashSet<CrateExclude>>,
 }
 
 #[derive(Parser, Debug)]
@@ -183,6 +183,10 @@ struct Args {
 
     /// The output path
     path: Option<Utf8PathBuf>,
+
+    /// Additional `Cargo.toml` to sync and vendor
+    #[arg(short, long, value_name = "TOML")]
+    sync: Option<Vec<Utf8PathBuf>>,
 }
 
 fn filter_manifest(manifest: &mut toml::Value) {
@@ -315,11 +319,14 @@ impl VendorFilter {
             .map(|v| {
                 v.iter()
                     .map(|e| CrateExclude::parse_str(e))
-                    .collect::<Result<Vec<_>>>()
+                    .collect::<Result<HashSet<_>>>()
             })
             .transpose()?;
         let r = (!args_unset).then(|| Self {
-            platforms: args.platform.clone(),
+            platforms: args
+                .platform
+                .as_ref()
+                .map(|x| HashSet::from_iter(x.iter().cloned())),
             tier: args.tier.clone(),
             all_features: args.all_features,
             exclude_crate_paths,
@@ -335,7 +342,7 @@ fn gather_config(args: &Args) -> Result<Option<VendorFilter>> {
         return Ok(Some(f));
     };
     // Otherwise gather from `package.metadata.vendor-filter` in Cargo.toml
-    let meta = new_metadata_cmd(args);
+    let meta = new_metadata_cmd(args.manifest_path.as_ref(), args.offline);
     let meta = meta
         .exec()
         .context("Executing cargo metadata (first run)")?;
@@ -347,7 +354,7 @@ fn gather_config(args: &Args) -> Result<Option<VendorFilter>> {
 }
 
 /// Given a crate, remove matching files/directories in excludes.
-fn process_excludes(path: &Utf8PathBuf, name: &str, excludes: &[&str]) -> Result<()> {
+fn process_excludes(path: &Utf8PathBuf, name: &str, excludes: &HashSet<String>) -> Result<()> {
     let mut matched = false;
     for exclude in excludes.iter().map(Utf8Path::new) {
         if exclude.is_absolute() {
@@ -492,21 +499,13 @@ fn generate_tar_from(
     Ok(())
 }
 
-fn new_metadata_cmd(args: &Args) -> MetadataCommand {
+fn new_metadata_cmd(path: Option<&Utf8PathBuf>, offline: bool) -> MetadataCommand {
     let mut command = MetadataCommand::new();
-    if args.offline {
+    if offline {
         command.other_options(vec![OFFLINE.to_string()]);
     }
-    if let Some(path) = args.manifest_path.as_deref() {
-        command.manifest_path(path);
-    }
-    command
-}
-
-fn new_metadata_cmd_with_config(args: &Args, config: &VendorFilter) -> MetadataCommand {
-    let mut command = new_metadata_cmd(args);
-    if config.all_features.unwrap_or_default() {
-        command.features(AllFeatures);
+    if let Some(p) = path {
+        command.manifest_path(p);
     }
     command
 }
@@ -515,13 +514,22 @@ fn get_unfiltered_packages(
     args: &Args,
     config: &VendorFilter,
 ) -> Result<HashMap<cargo_metadata::PackageId, cargo_metadata::Package>> {
-    let command = new_metadata_cmd_with_config(args, config);
-    let meta = command.exec().context("Executing cargo metadata")?;
-    Ok(meta
-        .packages
-        .into_iter()
-        .map(|pkg| (pkg.id.clone(), pkg))
-        .collect())
+    let all_tomls = args.manifest_path.iter().chain(args.sync.iter().flatten());
+    let mut packages = HashMap::new();
+    for toml in all_tomls {
+        let mut command = new_metadata_cmd(Some(toml), args.offline);
+        if config.all_features.unwrap_or_default() {
+            command.features(AllFeatures);
+        }
+        let meta = command.exec().context("Executing cargo metadata")?;
+        meta.packages
+            .into_iter()
+            .map(|pkg| (pkg.id.clone(), pkg))
+            .for_each(|(id, pkg)| {
+                packages.insert(id, pkg);
+            });
+    }
+    Ok(packages)
 }
 
 /// Using the filter configuration, add references to the `packages` map that
@@ -533,24 +541,31 @@ fn add_packages_for_platform<'p>(
     packages: &mut HashMap<cargo_metadata::PackageId, &'p cargo_metadata::Package>,
     platform: Option<&str>,
 ) -> Result<()> {
-    let mut command = new_metadata_cmd_with_config(args, config);
+    let all_tomls = args.manifest_path.iter().chain(args.sync.iter().flatten());
+    for toml in all_tomls {
+        let mut command = new_metadata_cmd(Some(toml), args.offline);
+        if config.all_features.unwrap_or_default() {
+            command.features(AllFeatures);
+        }
 
-    if let Some(platform) = platform {
-        command.other_options(vec![format!("--filter-platform={platform}")]);
-    }
-    let meta = command.exec().context("Executing cargo metadata")?;
-    for package in meta.packages {
-        let package = all_packages
-            .get(&package.id)
-            .ok_or_else(|| anyhow!("Failed to find package {}", package.name))
-            .unwrap();
-        packages.insert(package.id.clone(), package);
+        if let Some(platform) = platform {
+            command.other_options(vec![format!("--filter-platform={platform}")]);
+        }
+
+        let meta = command.exec().context("Executing cargo metadata")?;
+        for package in meta.packages {
+            let package = all_packages
+                .get(&package.id)
+                .ok_or_else(|| anyhow!("Failed to find package {}", package.name))
+                .unwrap();
+            packages.insert(package.id.clone(), package);
+        }
     }
     Ok(())
 }
 
 fn get_root_package(args: &Args) -> Result<Option<Package>> {
-    let mut command = new_metadata_cmd(args);
+    let mut command = new_metadata_cmd(args.manifest_path.as_ref(), args.offline);
     command.no_deps();
 
     let meta = command.exec().context("Executing cargo metadata")?;
@@ -624,7 +639,7 @@ fn expand_platforms<'a, 'b>(
 fn delete_unreferenced_packages(
     output_dir: &Utf8Path,
     package_filenames: &BTreeMap<Cow<'_, str>, &Package>,
-    excludes: &HashMap<&str, Vec<&str>>,
+    excludes: &HashMap<String, HashSet<String>>,
 ) -> Result<()> {
     // A reusable buffer (silly optimization to avoid allocating lots of path buffers)
     let mut pbuf = Utf8PathBuf::from(&output_dir);
@@ -791,13 +806,18 @@ fn run() -> Result<()> {
         .manifest_path
         .as_ref()
         .map(|o| ["--manifest-path", o.as_str()]);
-    let status = Command::new("cargo")
+    let mut builder = Command::new("cargo");
+    builder
         .args(["vendor"])
         .args(args.offline.then_some(OFFLINE))
         .args(args.respect_source_config.then_some(RESPECT_SOURCE_CONFIG))
-        .args(manifest_path.iter().flatten())
-        .arg(&*output_dir)
-        .status()?;
+        .args(manifest_path.iter().flatten());
+    if let Some(sync) = args.sync {
+        for s in sync {
+            builder.args([SYNC, s.as_str()]);
+        }
+    }
+    let status = builder.arg(&*output_dir).status()?;
     if !status.success() {
         anyhow::bail!("Failed to execute cargo vendor: {:?}", status);
     }
@@ -823,18 +843,17 @@ fn run() -> Result<()> {
     }
 
     // Index the excludes into a mapping from crate name -> [list of excludes].
-    let excludes = config
-        .exclude_crate_paths
-        .as_deref()
-        .unwrap_or_default()
-        .iter()
-        .try_fold(HashMap::<&str, Vec<&str>>::new(), |mut m, v| {
-            let name = v.name.as_str();
-            let exclude = v.exclude.as_str();
-            let a = m.entry(name).or_default();
-            a.push(exclude);
-            Ok::<_, anyhow::Error>(m)
-        })?;
+    let mut excludes: HashMap<String, HashSet<String>> = HashMap::new();
+    for ex_path in config.exclude_crate_paths.unwrap_or_default() {
+        if !excludes.contains_key(&ex_path.name) {}
+        if let Some(e) = excludes.get_mut(&ex_path.name) {
+            e.insert(ex_path.exclude.clone());
+        } else {
+            let mut new_set = HashSet::new();
+            new_set.insert(ex_path.exclude.clone());
+            excludes.insert(ex_path.name.clone(), new_set);
+        }
+    }
 
     delete_unreferenced_packages(&output_dir, &package_filenames, &excludes)?;
 
