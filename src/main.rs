@@ -7,7 +7,7 @@ use either::Either;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::{BufReader, Write};
 use std::process::Command;
 use std::vec;
@@ -120,7 +120,7 @@ impl CrateExclude {
 #[derive(PartialEq, Eq, Deserialize, Debug, Default)]
 #[serde(rename_all = "kebab-case")]
 struct VendorFilter {
-    platforms: Option<HashSet<String>>,
+    platforms: Option<BTreeSet<String>>,
     tier: Option<tiers::Tier>,
     all_features: Option<bool>,
     exclude_crate_paths: Option<HashSet<CrateExclude>>,
@@ -326,7 +326,7 @@ impl VendorFilter {
             platforms: args
                 .platform
                 .as_ref()
-                .map(|x| HashSet::from_iter(x.iter().cloned())),
+                .map(|x| BTreeSet::from_iter(x.iter().cloned())),
             tier: args.tier.clone(),
             all_features: args.all_features,
             exclude_crate_paths,
@@ -342,7 +342,7 @@ fn gather_config(args: &Args) -> Result<Option<VendorFilter>> {
         return Ok(Some(f));
     };
     // Otherwise gather from `package.metadata.vendor-filter` in Cargo.toml
-    let meta = new_metadata_cmd(args.manifest_path.as_ref(), args.offline);
+    let meta = new_metadata_cmd(args.manifest_path.as_deref(), args.offline);
     let meta = meta
         .exec()
         .context("Executing cargo metadata (first run)")?;
@@ -354,7 +354,7 @@ fn gather_config(args: &Args) -> Result<Option<VendorFilter>> {
 }
 
 /// Given a crate, remove matching files/directories in excludes.
-fn process_excludes(path: &Utf8PathBuf, name: &str, excludes: &HashSet<String>) -> Result<()> {
+fn process_excludes(path: &Utf8PathBuf, name: &str, excludes: &HashSet<&str>) -> Result<()> {
     let mut matched = false;
     for exclude in excludes.iter().map(Utf8Path::new) {
         if exclude.is_absolute() {
@@ -499,7 +499,7 @@ fn generate_tar_from(
     Ok(())
 }
 
-fn new_metadata_cmd(path: Option<&Utf8PathBuf>, offline: bool) -> MetadataCommand {
+fn new_metadata_cmd(path: Option<&Utf8Path>, offline: bool) -> MetadataCommand {
     let mut command = MetadataCommand::new();
     if offline {
         command.other_options(vec![OFFLINE.to_string()]);
@@ -565,7 +565,7 @@ fn add_packages_for_platform<'p>(
 }
 
 fn get_root_package(args: &Args) -> Result<Option<Package>> {
-    let mut command = new_metadata_cmd(args.manifest_path.as_ref(), args.offline);
+    let mut command = new_metadata_cmd(args.manifest_path.as_deref(), args.offline);
     command.no_deps();
 
     let meta = command.exec().context("Executing cargo metadata")?;
@@ -639,7 +639,7 @@ fn expand_platforms<'a, 'b>(
 fn delete_unreferenced_packages(
     output_dir: &Utf8Path,
     package_filenames: &BTreeMap<Cow<'_, str>, &Package>,
-    excludes: &HashMap<String, HashSet<String>>,
+    excludes: &HashMap<&str, HashSet<&str>>,
 ) -> Result<()> {
     // A reusable buffer (silly optimization to avoid allocating lots of path buffers)
     let mut pbuf = Utf8PathBuf::from(&output_dir);
@@ -843,15 +843,11 @@ fn run() -> Result<()> {
     }
 
     // Index the excludes into a mapping from crate name -> [list of excludes].
-    let mut excludes: HashMap<String, HashSet<String>> = HashMap::new();
-    for ex_path in config.exclude_crate_paths.unwrap_or_default() {
-        if !excludes.contains_key(&ex_path.name) {}
-        if let Some(e) = excludes.get_mut(&ex_path.name) {
-            e.insert(ex_path.exclude.clone());
-        } else {
-            let mut new_set = HashSet::new();
-            new_set.insert(ex_path.exclude.clone());
-            excludes.insert(ex_path.name.clone(), new_set);
+    let mut excludes: HashMap<&str, HashSet<&str>> = HashMap::new();
+    if let Some(exclude_paths) = &config.exclude_crate_paths {
+        for ex_path in exclude_paths {
+            let e = excludes.entry(ex_path.name.as_str()).or_default();
+            e.insert(ex_path.exclude.as_str());
         }
     }
 
