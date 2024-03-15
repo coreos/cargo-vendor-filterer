@@ -16,7 +16,6 @@ pub(crate) fn project_root() -> Result<Utf8PathBuf> {
     while path.exists() && path.is_dir() {
         let found_lock_file = path
             .read_dir_utf8()?
-            .into_iter()
             .filter_map(|e| e.ok())
             .any(|e| e.file_name().eq("Cargo.lock"));
         if found_lock_file {
@@ -60,26 +59,15 @@ impl fmt::Display for VendorFormat {
     }
 }
 
-pub(crate) struct VendorOptions<'a, 'b, 'c, 'd> {
+#[derive(Default)]
+pub(crate) struct VendorOptions<'a, 'b, 'c, 'd, 'e> {
     pub output: Option<&'a Utf8Path>,
     pub platforms: Option<&'b [&'b str]>,
     pub tier: Option<&'static str>,
     pub exclude_crate_paths: Option<&'c [&'c str]>,
     pub format: Option<VendorFormat>,
     pub manifest_path: Option<&'d Utf8Path>,
-}
-
-impl<'a, 'b, 'c, 'd> Default for VendorOptions<'a, 'b, 'c, 'd> {
-    fn default() -> Self {
-        Self {
-            output: None,
-            platforms: None,
-            tier: None,
-            exclude_crate_paths: None,
-            format: None,
-            manifest_path: None,
-        }
-    }
+    pub sync: Vec<&'e Utf8Path>,
 }
 
 /// Run a vendoring process
@@ -112,6 +100,9 @@ pub(crate) fn vendor(options: VendorOptions) -> Result<Output> {
     }
     if let Some(manifest_path) = options.manifest_path {
         cmd.arg(format!("--manifest-path={manifest_path}"));
+    }
+    for s in options.sync {
+        cmd.arg(format!("--sync={s}"));
     }
     if let Some(output) = options.output {
         cmd.arg(output);
@@ -162,4 +153,14 @@ pub(crate) fn verify_no_windows(dir: &Utf8Path) {
     // check that only one file exists
     windows_lib.pop();
     assert_eq!(windows_lib.read_dir_utf8().unwrap().count(), 1);
+}
+
+pub(crate) fn verify_no_macos(dir: &Utf8Path) {
+    let mut macos_lib = dir.join("core-foundation-sys/src/lib.rs");
+    assert!(macos_lib.exists());
+    assert_eq!(macos_lib.metadata().unwrap().len(), 0);
+
+    // check that only one file exists
+    macos_lib.pop();
+    assert_eq!(macos_lib.read_dir_utf8().unwrap().count(), 1);
 }
