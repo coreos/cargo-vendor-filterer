@@ -499,17 +499,29 @@ fn generate_tar_from(
     Ok(())
 }
 
-fn get_all_manifest_paths(args: &Args) -> Vec<Option<&Utf8Path>> {
-    // We have to always add the original manifest path, even if it's `None`
-    // to ensure that the cargo-commands are run at least once.
-    let mut all_manifest_paths = vec![args.manifest_path.as_deref()];
-    // Then add additional manifests, if there are any.
-    if let Some(s) = &args.sync {
-        for p in s {
-            all_manifest_paths.push(Some(p.as_path()));
+impl Args {
+    /// Return all manifest (aka `Cargo.toml`) to parse
+    fn get_all_manifest_paths(&self) -> Vec<Option<&Utf8Path>> {
+        // We have to always add the original manifest path, even if it's `None`
+        // to ensure that the cargo-commands are run at least once.
+        let mut all_manifest_paths = vec![self.manifest_path.as_deref()];
+        // Then add additional manifests, if there are any.
+        if let Some(s) = &self.sync {
+            for p in s {
+                all_manifest_paths.push(Some(p.as_path()));
+            }
         }
+        all_manifest_paths
     }
-    all_manifest_paths
+
+    /// Find the root package
+    fn get_root_package(&self) -> Result<Option<Package>> {
+        let mut command = new_metadata_cmd(self.manifest_path.as_deref(), self.offline);
+        command.no_deps();
+
+        let meta = command.exec().context("Executing cargo metadata")?;
+        Ok(meta.root_package().cloned())
+    }
 }
 
 fn new_metadata_cmd(path: Option<&Utf8Path>, offline: bool) -> MetadataCommand {
@@ -527,7 +539,7 @@ fn get_unfiltered_packages(
     args: &Args,
     config: &VendorFilter,
 ) -> Result<HashMap<cargo_metadata::PackageId, cargo_metadata::Package>> {
-    let all_manifest_paths = get_all_manifest_paths(args);
+    let all_manifest_paths = args.get_all_manifest_paths();
     let mut packages = HashMap::new();
     for manifest_path in all_manifest_paths {
         let mut command = new_metadata_cmd(manifest_path, args.offline);
@@ -554,7 +566,7 @@ fn add_packages_for_platform<'p>(
     packages: &mut HashMap<cargo_metadata::PackageId, &'p cargo_metadata::Package>,
     platform: Option<&str>,
 ) -> Result<()> {
-    let all_manifest_paths = get_all_manifest_paths(args);
+    let all_manifest_paths = args.get_all_manifest_paths();
     for manifest_path in all_manifest_paths {
         let mut command = new_metadata_cmd(manifest_path, args.offline);
         if config.all_features.unwrap_or_default() {
@@ -575,14 +587,6 @@ fn add_packages_for_platform<'p>(
         }
     }
     Ok(())
-}
-
-fn get_root_package(args: &Args) -> Result<Option<Package>> {
-    let mut command = new_metadata_cmd(args.manifest_path.as_deref(), args.offline);
-    command.no_deps();
-
-    let meta = command.exec().context("Executing cargo metadata")?;
-    Ok(meta.root_package().cloned())
 }
 
 /// Parse the output of `rustc --print target-list`
@@ -757,7 +761,7 @@ fn run() -> Result<()> {
     // We need to gather the full, unfiltered metadata to canonically know what
     // `cargo vendor` will do.
     let all_packages = get_unfiltered_packages(&args, &config)?;
-    let root = get_root_package(&args)?;
+    let root = args.get_root_package()?;
 
     // Create a mapping of name -> [package versions]
     let mut pkgs_by_name = BTreeMap::<_, Vec<_>>::new();
