@@ -499,18 +499,17 @@ fn generate_tar_from(
     Ok(())
 }
 
-fn get_all_tomls_from(args: &Args) -> Vec<Option<&Utf8Path>> {
-    let mut all_tomls = Vec::new();
+fn get_all_manifest_paths(args: &Args) -> Vec<Option<&Utf8Path>> {
     // We have to always add the original manifest path, even if it's `None`
     // to ensure that the cargo-commands are run at least once.
-    all_tomls.push(args.manifest_path.as_ref().map(|p| p.as_path()));
+    let mut all_manifest_paths = vec![args.manifest_path.as_deref()];
     // Then add additional manifests, if there are any.
     if let Some(s) = &args.sync {
         for p in s {
-            all_tomls.push(Some(p.as_path()));
+            all_manifest_paths.push(Some(p.as_path()));
         }
     }
-    all_tomls
+    all_manifest_paths
 }
 
 fn new_metadata_cmd(path: Option<&Utf8Path>, offline: bool) -> MetadataCommand {
@@ -528,10 +527,10 @@ fn get_unfiltered_packages(
     args: &Args,
     config: &VendorFilter,
 ) -> Result<HashMap<cargo_metadata::PackageId, cargo_metadata::Package>> {
-    let all_tomls = get_all_tomls_from(args);
+    let all_manifest_paths = get_all_manifest_paths(args);
     let mut packages = HashMap::new();
-    for toml in all_tomls {
-        let mut command = new_metadata_cmd(toml, args.offline);
+    for manifest_path in all_manifest_paths {
+        let mut command = new_metadata_cmd(manifest_path, args.offline);
         if config.all_features.unwrap_or_default() {
             command.features(AllFeatures);
         }
@@ -555,9 +554,9 @@ fn add_packages_for_platform<'p>(
     packages: &mut HashMap<cargo_metadata::PackageId, &'p cargo_metadata::Package>,
     platform: Option<&str>,
 ) -> Result<()> {
-    let all_tomls = get_all_tomls_from(args);
-    for toml in all_tomls {
-        let mut command = new_metadata_cmd(toml, args.offline);
+    let all_manifest_paths = get_all_manifest_paths(args);
+    for manifest_path in all_manifest_paths {
+        let mut command = new_metadata_cmd(manifest_path, args.offline);
         if config.all_features.unwrap_or_default() {
             command.features(AllFeatures);
         }
