@@ -630,9 +630,9 @@ fn expand_one_platform<'t>(
     r
 }
 
-fn expand_platforms<'a, 'b>(
+fn expand_platforms<'b>(
     platforms: &'b [&'b str],
-    target_list: &'a [(&str, ParsedPlatform)],
+    target_list: &[(&str, ParsedPlatform)],
 ) -> Result<Vec<String>> {
     let r = platforms
         .iter()
