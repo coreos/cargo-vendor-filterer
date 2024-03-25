@@ -14,7 +14,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  ACTIONS_LINTS_TOOLCHAIN: 1.66.0
+  ACTIONS_LINTS_TOOLCHAIN: 1.75.0
 
 jobs:
   build-test:
