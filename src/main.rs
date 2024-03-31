@@ -125,8 +125,8 @@ struct VendorFilter {
     platforms: Option<BTreeSet<String>>,
     tier: Option<tiers::Tier>,
     all_features: Option<bool>,
-    no_default_features: Option<bool>,
-    features: Option<Vec<String>>,
+    no_default_features: bool,
+    features: Vec<String>,
     exclude_crate_paths: Option<HashSet<CrateExclude>>,
 }
 
@@ -167,11 +167,14 @@ struct Args {
 
     /// Do not activate the `default` feature
     #[arg(long)]
-    no_default_features: Option<bool>,
+    no_default_features: bool,
 
-    /// Space or comma separated list of features to activate
+    /// Space or comma separated list of features to activate. Features
+    /// of workspace members may be enabled with package-name/feature-name
+    /// syntax. This flag may be specified multiple times, which enables all
+    /// specified features.
     #[arg(long, short = 'F')]
-    features: Option<Vec<String>>,
+    features: Vec<String>,
 
     /// Pick the output format.
     #[arg(long, default_value = "dir")]
@@ -324,8 +327,8 @@ impl VendorFilter {
         let args_unset = args.platform.is_none()
             && args.tier.is_none()
             && args.all_features.is_none()
-            && args.no_default_features.is_none()
-            && args.features.is_none()
+            && !args.no_default_features
+            && args.features.is_empty()
             && args.exclude_crate_path.is_none();
         let exclude_crate_paths = args
             .exclude_crate_path
@@ -562,13 +565,11 @@ fn get_unfiltered_packages(
         if config.all_features.unwrap_or_default() {
             command.features(AllFeatures);
         }
-        if config.no_default_features.unwrap_or_default() {
+        if config.no_default_features {
             command.features(NoDefaultFeatures);
         }
-        if let Some(some_features) = &config.features {
-            if !some_features.is_empty() {
-                command.features(SomeFeatures(some_features.clone()));
-            }
+        if !config.features.is_empty() {
+            command.features(SomeFeatures(config.features.clone()));
         }
         let meta = command.exec().context("Executing cargo metadata")?;
         meta.packages
