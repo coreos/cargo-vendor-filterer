@@ -125,7 +125,9 @@ struct VendorFilter {
     platforms: Option<BTreeSet<String>>,
     tier: Option<tiers::Tier>,
     all_features: Option<bool>,
+    #[serde(default)]
     no_default_features: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
     features: Vec<String>,
     exclude_crate_paths: Option<HashSet<CrateExclude>>,
 }
@@ -166,7 +168,7 @@ struct Args {
     all_features: Option<bool>,
 
     /// Do not activate the `default` feature
-    #[arg(long)]
+    #[arg(long, default_value_t = false)]
     no_default_features: bool,
 
     /// Space or comma separated list of features to activate. Features
@@ -935,9 +937,10 @@ fn test_parse_config() {
     let valid = vec![
         json!({}),
         json!({ "platforms": ["aarch64-unknown-linux-gnu"]}),
-        json!({ "platforms": ["*-unknown-linux-gnu"], "tier": "2"}),
-        json!({ "platforms": ["*-unknown-linux-gnu"], "tier": "Two"}),
-        json!({ "platforms": ["aarch64-unknown-linux-gnu"], "all-features": true}),
+        json!({ "platforms": ["aarch64-unknown-linux-gnu"], "no-default-features": true}),
+        json!({ "platforms": ["*-unknown-linux-gnu"], "tier": "2", "no-default-features": false}),
+        json!({ "platforms": ["*-unknown-linux-gnu"], "tier": "Two", "no-default-features": false}),
+        json!({ "platforms": ["aarch64-unknown-linux-gnu"], "all-features": true, "no-default-features": false}),
         json!({ "platforms": ["aarch64-unknown-linux-gnu"], "no-default-features": true}),
         json!({ "platforms": ["aarch64-unknown-linux-gnu"], "no-default-features": true, "features": ["first-feature", "second-feature"]}),
     ];
