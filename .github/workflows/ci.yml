@@ -97,7 +97,9 @@ jobs:
       - run: sudo apt install protobuf-compiler
       - run: |
           mkdir -p .cargo && cargo-vendor-filterer --platform x86_64-unknown-linux-gnu --all-features true > .cargo/config.toml
+          rm -rfv true
           cargo-vendor-filterer --platform x86_64-unknown-linux-gnu --no-default-features true > .cargo/config.toml
+          rm -rfv true
           if [[ ${{ env.repo }} == "nushell/nushell" ]]; then
               cargo-vendor-filterer --platform x86_64-unknown-linux-gnu --no-default-features -F plugin true > .cargo/config.toml
           else
