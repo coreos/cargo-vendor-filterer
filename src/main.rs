@@ -124,7 +124,8 @@ impl CrateExclude {
 struct VendorFilter {
     platforms: Option<BTreeSet<String>>,
     tier: Option<tiers::Tier>,
-    all_features: Option<bool>,
+    #[serde(default)]
+    all_features: bool,
     #[serde(default)]
     no_default_features: bool,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
@@ -164,8 +165,8 @@ struct Args {
     manifest_path: Option<Utf8PathBuf>,
 
     /// Activate all available features
-    #[arg(long)]
-    all_features: Option<bool>,
+    #[arg(long, default_value_t = false)]
+    all_features: bool,
 
     /// Do not activate the `default` feature
     #[arg(long, default_value_t = false)]
@@ -328,7 +329,7 @@ impl VendorFilter {
     fn parse_args(args: &Args) -> Result<Option<Self>> {
         let args_unset = args.platform.is_none()
             && args.tier.is_none()
-            && args.all_features.is_none()
+            && !args.all_features
             && !args.no_default_features
             && args.features.is_empty()
             && args.exclude_crate_path.is_none();
@@ -564,7 +565,7 @@ fn get_unfiltered_packages(
     let mut packages = HashMap::new();
     for manifest_path in all_manifest_paths {
         let mut command = new_metadata_cmd(manifest_path, args.offline);
-        if config.all_features.unwrap_or_default() {
+        if config.all_features {
             command.features(AllFeatures);
         }
         if config.no_default_features {
@@ -596,7 +597,7 @@ fn add_packages_for_platform<'p>(
     let all_manifest_paths = args.get_all_manifest_paths();
     for manifest_path in all_manifest_paths {
         let mut command = new_metadata_cmd(manifest_path, args.offline);
-        if config.all_features.unwrap_or_default() {
+        if config.all_features {
             command.features(AllFeatures);
         }
 
