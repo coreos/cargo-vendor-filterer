@@ -600,7 +600,12 @@ fn add_packages_for_platform<'p>(
         if config.all_features {
             command.features(AllFeatures);
         }
-
+        if config.no_default_features {
+            command.features(NoDefaultFeatures);
+        }
+        if !config.features.is_empty() {
+            command.features(SomeFeatures(config.features.clone()));
+        }
         if let Some(platform) = platform {
             command.other_options(vec![format!("--filter-platform={platform}")]);
         }
