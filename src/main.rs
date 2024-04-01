@@ -1,7 +1,9 @@
 use anyhow::{anyhow, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
-use cargo_metadata::Package;
-use cargo_metadata::{CargoOpt::AllFeatures, MetadataCommand};
+use cargo_metadata::{
+    CargoOpt::{AllFeatures, NoDefaultFeatures, SomeFeatures},
+    MetadataCommand, Package,
+};
 use clap::Parser;
 use either::Either;
 use serde::{Deserialize, Serialize};
@@ -122,7 +124,12 @@ impl CrateExclude {
 struct VendorFilter {
     platforms: Option<BTreeSet<String>>,
     tier: Option<tiers::Tier>,
-    all_features: Option<bool>,
+    #[serde(default)]
+    all_features: bool,
+    #[serde(default)]
+    no_default_features: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    features: Vec<String>,
     exclude_crate_paths: Option<HashSet<CrateExclude>>,
 }
 
@@ -157,9 +164,20 @@ struct Args {
     #[arg(long)]
     manifest_path: Option<Utf8PathBuf>,
 
-    /// Enable all features
-    #[arg(long)]
-    all_features: Option<bool>,
+    /// Activate all available features
+    #[arg(long, default_value_t = false)]
+    all_features: bool,
+
+    /// Do not activate the `default` feature
+    #[arg(long, default_value_t = false)]
+    no_default_features: bool,
+
+    /// Space or comma separated list of features to activate. Features
+    /// of workspace members may be enabled with package-name/feature-name
+    /// syntax. This flag may be specified multiple times, which enables all
+    /// specified features.
+    #[arg(long, short = 'F')]
+    features: Vec<String>,
 
     /// Pick the output format.
     #[arg(long, default_value = "dir")]
@@ -311,7 +329,9 @@ impl VendorFilter {
     fn parse_args(args: &Args) -> Result<Option<Self>> {
         let args_unset = args.platform.is_none()
             && args.tier.is_none()
-            && args.all_features.is_none()
+            && !args.all_features
+            && !args.no_default_features
+            && args.features.is_empty()
             && args.exclude_crate_path.is_none();
         let exclude_crate_paths = args
             .exclude_crate_path
@@ -329,6 +349,8 @@ impl VendorFilter {
                 .map(|x| BTreeSet::from_iter(x.iter().cloned())),
             tier: args.tier.clone(),
             all_features: args.all_features,
+            no_default_features: args.no_default_features,
+            features: args.features.clone(),
             exclude_crate_paths,
         });
         Ok(r)
@@ -543,8 +565,14 @@ fn get_unfiltered_packages(
     let mut packages = HashMap::new();
     for manifest_path in all_manifest_paths {
         let mut command = new_metadata_cmd(manifest_path, args.offline);
-        if config.all_features.unwrap_or_default() {
+        if config.all_features {
             command.features(AllFeatures);
+        }
+        if config.no_default_features {
+            command.features(NoDefaultFeatures);
+        }
+        if !config.features.is_empty() {
+            command.features(SomeFeatures(config.features.clone()));
         }
         let meta = command.exec().context("Executing cargo metadata")?;
         meta.packages
@@ -569,10 +597,15 @@ fn add_packages_for_platform<'p>(
     let all_manifest_paths = args.get_all_manifest_paths();
     for manifest_path in all_manifest_paths {
         let mut command = new_metadata_cmd(manifest_path, args.offline);
-        if config.all_features.unwrap_or_default() {
+        if config.all_features {
             command.features(AllFeatures);
         }
-
+        if config.no_default_features {
+            command.features(NoDefaultFeatures);
+        }
+        if !config.features.is_empty() {
+            command.features(SomeFeatures(config.features.clone()));
+        }
         if let Some(platform) = platform {
             command.other_options(vec![format!("--filter-platform={platform}")]);
         }
@@ -910,9 +943,12 @@ fn test_parse_config() {
     let valid = vec![
         json!({}),
         json!({ "platforms": ["aarch64-unknown-linux-gnu"]}),
-        json!({ "platforms": ["*-unknown-linux-gnu"], "tier": "2"}),
-        json!({ "platforms": ["*-unknown-linux-gnu"], "tier": "Two"}),
-        json!({ "platforms": ["aarch64-unknown-linux-gnu"], "all-features": true}),
+        json!({ "platforms": ["aarch64-unknown-linux-gnu"], "no-default-features": true}),
+        json!({ "platforms": ["*-unknown-linux-gnu"], "tier": "2", "no-default-features": false}),
+        json!({ "platforms": ["*-unknown-linux-gnu"], "tier": "Two", "no-default-features": false}),
+        json!({ "platforms": ["aarch64-unknown-linux-gnu"], "all-features": true, "no-default-features": false}),
+        json!({ "platforms": ["aarch64-unknown-linux-gnu"], "no-default-features": true}),
+        json!({ "platforms": ["aarch64-unknown-linux-gnu"], "no-default-features": true, "features": ["first-feature", "second-feature"]}),
     ];
     for case in valid {
         let _: VendorFilter = serde_json::from_value(case).unwrap();
