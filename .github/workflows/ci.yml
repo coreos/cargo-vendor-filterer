@@ -75,24 +75,26 @@ jobs:
     needs: build-test
     strategy:
       matrix:
-        repos: 
-          - "nushell/nushell@0.91.0"
-          - "containers/netavark@v1.8.0"
+        repo:
+          - nushell/nushell
+          - containers/netavark
+        include:
+          - repo: nushell/nushell
+            tag: 0.91.0
+            args: "-F plugin -F system-clipboard -F default-no-clipboard"
+          - repo: containers/netavark
+            tag: v1.8.0
+            args: "-F deps-serde"
     steps:
       - name: Download binary
         uses: actions/download-artifact@v2
         with:
           name: cargo-vendor-filterer
       - run: sudo install -m 0755 cargo-vendor-filterer /usr/bin
-      - run: |
-          r="${{ matrix.repos }}"
-          parts=(${r//@/ })
-          echo repo=${parts[0]} >> $GITHUB_ENV
-          echo tag=${parts[1]} >> $GITHUB_ENV
       - uses: actions/checkout@v3
         with:
-          repository: ${{ env.repo }}
-          ref: ${{ env.tag }}
+          repository: ${{ matrix.repo }}
+          ref: ${{ matrix.tag }}
       # For netavark
       - run: sudo apt install protobuf-compiler
       - run: |
@@ -100,10 +102,6 @@ jobs:
           rm -rf vendor
           cargo-vendor-filterer --platform x86_64-unknown-linux-gnu --no-default-features > .cargo/config.toml
           rm -rf vendor
-          if [[ ${{ env.repo }} == "nushell/nushell" ]]; then
-              cargo-vendor-filterer --platform x86_64-unknown-linux-gnu --no-default-features -F plugin -F system-clipboard -F default-no-clipboard > .cargo/config.toml
-          else
-              cargo-vendor-filterer --platform x86_64-unknown-linux-gnu --no-default-features -F deps-serde > .cargo/config.toml
-          fi
+          cargo-vendor-filterer --platform x86_64-unknown-linux-gnu --no-default-features ${{ matrix.args }} > .cargo/config.toml
       # This runs without networking, verifying we're building using vendored deps
       - run: rm ~/.cargo/{registry,git} -rf && unshare -Umn cargo check --offline
