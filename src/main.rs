@@ -384,8 +384,17 @@ fn process_excludes(path: &Utf8PathBuf, name: &str, excludes: &HashSet<&str>) ->
         }
         let path = path.join(exclude);
 
-        if path.exists() {
-            std::fs::remove_dir_all(path)?;
+        let meta = match path.symlink_metadata() {
+            Ok(r) => Ok(Some(r)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }?;
+        if let Some(meta) = meta {
+            if meta.is_dir() {
+                std::fs::remove_dir_all(path)?;
+            } else {
+                std::fs::remove_file(path)?;
+            }
             eprintln!("Removed from crate {name}: {exclude}");
             matched = true;
         } else {
