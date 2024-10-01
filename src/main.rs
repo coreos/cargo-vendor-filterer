@@ -148,13 +148,14 @@ struct Args {
 
     /// Remove files/subdirectories in crates that match an exact path.
     ///
-    /// The format is "CRATENAME#PATH".  CRATENAME is the name of a crate (without
-    /// a version included).  PATH must be a relative path, and can name a regular
-    /// file, symbolic link or a directory.
+    /// The format is "CRATENAME#PATH". CRATENAME is the name of a crate (without
+    /// a version included) or "*" as a wildcard for all crates. PATH must be a
+    /// relative path, and can name a regular file, symbolic link or a directory.
     ///
     /// If the filename matches a directory, it and all its contents will be removed.
     /// For example, `curl-sys#curl` will remove the vendored libcurl C sources
     /// from the `curl-sys` crate.
+    /// For example, `*#tests` will remove tests folder from all crates.
     ///
     /// Nonexistent paths will emit a warning, but are not currently an error.
     #[arg(long)]
@@ -712,8 +713,11 @@ fn delete_unreferenced_packages(
             assert!(unreferenced.insert(name.to_string()));
         }
 
-        if let Some(excludes) = excludes.get(name) {
-            process_excludes(&pbuf, name, excludes)?;
+        if let Some(crate_excludes) = excludes.get(name) {
+            process_excludes(&pbuf, name, crate_excludes)?;
+        }
+        if let Some(generic_excludes) = excludes.get("*") {
+            process_excludes(&pbuf, name, generic_excludes)?;
         }
 
         let r = pbuf.pop();
