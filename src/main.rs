@@ -147,7 +147,6 @@ struct Args {
     tier: Option<tiers::Tier>,
 
     /// Remove files/subdirectories in crates that match an exact path.
-    ///
     /// The format is "CRATENAME#PATH". CRATENAME is the name of a crate (without
     /// a version included) or "*" as a wildcard for all crates. PATH must be a
     /// relative path, and can name a regular file, symbolic link or a directory.
