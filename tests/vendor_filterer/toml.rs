@@ -42,9 +42,10 @@ fn metadata() {
 
         [dependencies]
         hex = "0.4"
+        libz-sys = "1.1.16"
 
         [package.metadata.vendor-filter]
-        exclude-crate-paths = [ { name = "hex", exclude = "benches" } ]
+        exclude-crate-paths = [ { name = "hex", exclude = "benches" }, { name = "libz-sys", exclude = "src/smoke.c" } ]
     "#,
     )
     .unwrap();
@@ -56,6 +57,12 @@ fn metadata() {
         ..Default::default()
     })
     .unwrap();
+    if !output.status.success() {
+        let _ = std::io::copy(
+            &mut std::io::Cursor::new(&output.stderr),
+            &mut std::io::stderr(),
+        );
+    }
     assert!(output.status.success());
     let hex = output_folder.join("hex");
     assert!(hex.exists());

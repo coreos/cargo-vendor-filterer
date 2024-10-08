@@ -35,6 +35,7 @@ tier = "2"
 all-features = true
 exclude-crate-paths = [ { name = "curl-sys", exclude = "curl" },
                         { name = "libz-sys", exclude = "src/zlib" },
+                        { name = "libz-sys", exclude = "src/smoke.c" },
                         { name = "libz-sys", exclude = "src/zlib-ng" },
                         { name = "*", exclude = "tests" },
                       ]
