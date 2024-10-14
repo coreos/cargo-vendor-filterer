@@ -18,3 +18,21 @@ fn linux_multiple_platforms() {
     test_folder.push("../tests");
     assert!(!test_folder.exists());
 }
+
+#[test]
+fn windows_with_dep_kind_filter_normal() {
+    let (_td, mut test_folder) = tempdir().unwrap();
+    test_folder.push("vendor-test2");
+    let output = vendor(VendorOptions {
+        output: Some(&test_folder),
+        platforms: Some(&["x86_64-pc-windows-gnu"]),
+        dep_kinds: Some("normal"),
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(output.status.success());
+    test_folder.push("once_cell/examples"); // crate replaced with a stub, so examples removed
+    assert!(!test_folder.exists());
+    test_folder.push("../openssl/examples"); // openssl removed because defined only for non-windows
+    assert!(!test_folder.exists());
+}

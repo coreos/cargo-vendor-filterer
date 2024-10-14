@@ -69,6 +69,7 @@ pub(crate) struct VendorOptions<'a, 'b, 'c, 'd, 'e> {
     pub manifest_path: Option<&'d Utf8Path>,
     pub sync: Vec<&'e Utf8Path>,
     pub versioned_dirs: bool,
+    pub dep_kinds: Option<&'static str>,
 }
 
 /// Run a vendoring process
@@ -104,6 +105,9 @@ pub(crate) fn vendor(options: VendorOptions) -> Result<Output> {
     }
     for s in options.sync {
         cmd.arg(format!("--sync={s}"));
+    }
+    if let Some(dep_kinds) = options.dep_kinds {
+        cmd.args(["--dep-kinds", dep_kinds]);
     }
     if let Some(output) = options.output {
         cmd.arg(output);
