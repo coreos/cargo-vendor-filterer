@@ -20,6 +20,8 @@ pub const OFFLINE: &str = "--offline";
 pub const SYNC: &str = "--sync";
 /// The CLI argument passed to `cargo vendor` to respect override of the `crates.io` source when downloading crates
 pub const RESPECT_SOURCE_CONFIG: &str = "--respect-source-config";
+/// The CLI argument passed to `cargo vendor` to always include version in subdir name
+pub const VERSIONED_DIRS: &str = "--versioned-dirs";
 /// The package entry
 pub const MANIFEST_KEY_PACKAGE: &str = "package";
 /// Extra targets which we need to remove because Cargo validates them and will

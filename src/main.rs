@@ -199,6 +199,11 @@ struct Args {
     #[arg(long)]
     respect_source_config: bool,
 
+    /// Always include version in subdir names, even if we have only one version vendored
+    /// ; this is passed down to e.g. `cargo vendor --versioned-dirs`.
+    #[arg(long)]
+    versioned_dirs: bool,
+
     /// The output path
     path: Option<Utf8PathBuf>,
 
@@ -873,6 +878,7 @@ fn run() -> Result<()> {
         .args(["vendor"])
         .args(args.offline.then_some(OFFLINE))
         .args(args.respect_source_config.then_some(RESPECT_SOURCE_CONFIG))
+        .args(args.versioned_dirs.then_some(VERSIONED_DIRS))
         .args(manifest_path.iter().flatten());
     if let Some(sync) = args.sync {
         for s in sync {
