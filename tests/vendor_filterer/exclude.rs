@@ -1,6 +1,7 @@
 use super::common::{tempdir, vendor, verify_no_windows, VendorOptions};
 
 #[test]
+#[serial_test::parallel]
 fn linux_multiple_platforms() {
     let (_td, mut test_folder) = tempdir().unwrap();
     test_folder.push("vendor");
@@ -20,6 +21,7 @@ fn linux_multiple_platforms() {
 }
 
 #[test]
+#[serial_test::parallel]
 fn windows_with_dep_kind_filter_normal() {
     let (_td, mut test_folder) = tempdir().unwrap();
     test_folder.push("vendor-test2");
@@ -31,7 +33,7 @@ fn windows_with_dep_kind_filter_normal() {
     })
     .unwrap();
     assert!(output.status.success());
-    test_folder.push("once_cell/examples"); // crate replaced with a stub, so examples removed
+    test_folder.push("serial_test/tests"); // crate replaced with a stub, so tests folder is removed
     assert!(!test_folder.exists());
     test_folder.push("../openssl/examples"); // openssl removed because defined only for non-windows
     assert!(!test_folder.exists());

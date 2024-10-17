@@ -175,7 +175,7 @@ mod tests {
             Some("x86_64-pc-windows-gnu"),
         );
         match rp {
-            Ok(rp) => assert_eq!(rp.len(), 2), // own package + once_cell dev dependency
+            Ok(rp) => assert_eq!(rp.len(), 3), // own package + once_cell + serial_test dev dependencies
             Err(e) => panic!("Got error: {e:?}"),
         }
     }
@@ -208,7 +208,7 @@ mod tests {
             Some("x86_64-pc-windows-gnu"),
         );
 
-        // no-build => normal + dev dependencies, so including once_call
+        // no-build => normal + dev dependencies, so including once_call and serial_test
         let rp_no_build = get_required_packages(
             &vec![Some(&own_cargo_toml)],
             false,
@@ -216,12 +216,13 @@ mod tests {
             Some("x86_64-pc-windows-gnu"),
         );
 
-        // actual number will vary with crate updates but the difference of 1 should persist
+        // if once_cell is also a normal dependency, it is not removed from the list
         match (rp_normal, rp_no_build) {
-            (Ok(rp_normal), Ok(rp_all)) => assert_eq!(
-                rp_normal.len() + 1,
-                rp_all.len(),
-                "Failed to get once_cell as a dev-only dependency. Check if it is not a normal sub-dependency"
+            (Ok(rp_normal), Ok(rp_all)) => assert!(
+                rp_normal.len() < rp_all.len(),
+                "Filtering does not work. Got {} normal and {} no-build dependencies",
+                rp_normal.len(),
+                rp_all.len()
             ),
             _ => panic!("One of get_required_packages() calls failed"),
         }
