@@ -19,7 +19,7 @@ repository = "https://github.com/coreos/cargo-vendor-filterer"
 anyhow = "1.0"
 camino = "1.0"
 cargo-lock = "10"
-cargo_metadata = "0.18.1"
+cargo_metadata = "0.18"
 clap = { version = "4.1", features = ["derive", "wrap_help"] }
 flate2 = "1.0"
 hex = "0.4"
