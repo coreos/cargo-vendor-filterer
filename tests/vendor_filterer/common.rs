@@ -8,7 +8,7 @@ use anyhow::bail;
 use anyhow::Result;
 use camino;
 use camino::{Utf8Path, Utf8PathBuf};
-use cargo_vendor_filterer::SELF_NAME;
+use cargo_vendor_filterer::{SELF_NAME, VERSIONED_DIRS};
 
 // Return the project root
 pub(crate) fn project_root() -> Result<Utf8PathBuf> {
@@ -68,6 +68,7 @@ pub(crate) struct VendorOptions<'a, 'b, 'c, 'd, 'e> {
     pub format: Option<VendorFormat>,
     pub manifest_path: Option<&'d Utf8Path>,
     pub sync: Vec<&'e Utf8Path>,
+    pub versioned_dirs: bool,
 }
 
 /// Run a vendoring process
@@ -106,6 +107,9 @@ pub(crate) fn vendor(options: VendorOptions) -> Result<Output> {
     }
     if let Some(output) = options.output {
         cmd.arg(output);
+    }
+    if options.versioned_dirs {
+        cmd.arg(VERSIONED_DIRS);
     }
 
     Ok({
