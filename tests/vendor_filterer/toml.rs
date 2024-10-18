@@ -1,4 +1,6 @@
-use super::common::{tempdir, vendor, write_file_create_parents, VendorOptions};
+use super::common::{
+    tempdir, vendor, verify_crate_is_no_stub, write_file_create_parents, VendorOptions,
+};
 
 #[test]
 fn manifest_path() {
@@ -25,8 +27,7 @@ fn manifest_path() {
     })
     .unwrap();
     assert!(output.status.success());
-    let bitflags = output_folder.join("bitflags");
-    assert!(bitflags.exists());
+    verify_crate_is_no_stub(&output_folder, "bitflags");
 }
 
 #[test]
