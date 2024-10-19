@@ -93,7 +93,7 @@ pub(crate) fn filter_dep_kinds(
 
 /// Returns the set of required packages to satisfy filters specified in config
 fn get_required_packages<'a>(
-    manifest_paths: &Vec<Option<&Utf8Path>>,
+    manifest_paths: &[Option<&Utf8Path>],
     offline: bool,
     config: &VendorFilter,
     platform: Option<&str>,
@@ -170,7 +170,7 @@ mod tests {
         let mut own_cargo_toml = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         own_cargo_toml.push("Cargo.toml");
         let rp = get_required_packages(
-            &vec![Some(&own_cargo_toml)],
+            &[Some(&own_cargo_toml)],
             false,
             &serde_json::from_value(json!({ "keep-dep-kinds": "dev"})).unwrap(),
             Some("x86_64-pc-windows-gnu"),
@@ -186,7 +186,7 @@ mod tests {
         let mut own_cargo_toml = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         own_cargo_toml.push("Cargo.toml");
         let rp = get_required_packages(
-            &vec![Some(&own_cargo_toml)],
+            &[Some(&own_cargo_toml)],
             false,
             &serde_json::from_value(json!({ "keep-dep-kinds": "all", "--all-features": true}))
                 .unwrap(),
@@ -204,7 +204,7 @@ mod tests {
         own_cargo_toml.push("Cargo.toml");
 
         let rp_normal = get_required_packages(
-            &vec![Some(&own_cargo_toml)],
+            &[Some(&own_cargo_toml)],
             false,
             &serde_json::from_value(json!({ "keep-dep-kinds": "normal"})).unwrap(),
             Some("x86_64-pc-windows-gnu"),
@@ -212,7 +212,7 @@ mod tests {
 
         // no-build => normal + dev dependencies, so including once_call, serial_test...
         let rp_no_build = get_required_packages(
-            &vec![Some(&own_cargo_toml)],
+            &[Some(&own_cargo_toml)],
             false,
             &serde_json::from_value(json!({ "keep-dep-kinds": "no-build"})).unwrap(),
             Some("x86_64-pc-windows-gnu"),
@@ -236,7 +236,7 @@ mod tests {
         own_cargo_toml.push("Cargo.toml");
 
         let rp_build = get_required_packages(
-            &vec![Some(&own_cargo_toml)],
+            &[Some(&own_cargo_toml)],
             false,
             &serde_json::from_value(json!({ "keep-dep-kinds": "build"})).unwrap(),
             Some("x86_64-unknown-linux-gnu"),
@@ -244,7 +244,7 @@ mod tests {
 
         // no-dev => build + normal so the list shall be larger
         let rp_no_dev = get_required_packages(
-            &vec![Some(&own_cargo_toml)],
+            &[Some(&own_cargo_toml)],
             false,
             &serde_json::from_value(json!({ "keep-dep-kinds": "no-dev"})).unwrap(),
             Some("x86_64-unknown-linux-gnu"),
