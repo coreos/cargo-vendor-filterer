@@ -41,7 +41,7 @@ and development dependencies from all crates:
 platforms = ["*-unknown-linux-gnu"]
 tier = "2"
 all-features = true
-keep_dep_kinds = "no-dev"
+keep-dep-kinds = "no-dev"
 exclude-crate-paths = [ { name = "curl-sys", exclude = "curl" },
                         { name = "libz-sys", exclude = "src/zlib" },
                         { name = "libz-sys", exclude = "src/smoke.c" },
@@ -60,7 +60,7 @@ key `workspace.metadata.vendor-filter`.
   and `*` wildcards are supported.  For example, `*-unknown-linux-gnu`.
 - `tier`: This can be either "1" or "2".  It may be specified in addition to `platforms`.
 - `all-features`: Enable all features of the current crate when vendoring.
-- `keep_dep_kinds`: Specify which dependencies kinds to keep.
+- `keep-dep-kinds`: Specify which dependencies kinds to keep.
   Can be one of: all, normal, build, dev, no-normal, no-build, no-dev
 - `exclude-crate-paths`: Remove files and directories from target crates.  A key
   use case for this is removing the vendored copy of C libraries embedded in
