@@ -1,5 +1,5 @@
 use crate::{Args, VendorFilter};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use camino::Utf8Path;
 use clap::{builder::PossibleValue, ValueEnum};
 use serde::{Deserialize, Serialize};
@@ -8,7 +8,7 @@ use std::{
     collections::{HashMap, HashSet},
 };
 
-/// Kind of dependencies that shall be included.
+/// Kinds of dependencies that shall be included.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DepKinds {
@@ -59,8 +59,8 @@ impl std::fmt::Display for DepKinds {
 /// Filter out unwanted dependency kinds.
 ///
 /// Replicates logic from add_packages_for_platform() but uses cargo tree
-/// because cargo metadata does not implement dependency kind filtering.
-/// Ref: <https://github.com/rust-lang/cargo/issues/7065>
+/// because cargo metadata does not implement dependency kinds filtering.
+/// Ref: <https://github.com/rust-lang/cargo/issues/10718>
 /// Cargo tree is NOT intended for automatic processing so this function
 /// explicitly does not replace the add_packages_for_platform() entirely.
 pub(crate) fn filter_dep_kinds(
@@ -69,8 +69,8 @@ pub(crate) fn filter_dep_kinds(
     packages: &mut HashMap<cargo_metadata::PackageId, &cargo_metadata::Package>,
     platform: Option<&str>,
 ) -> Result<()> {
-    // exit early when no dependency kind filtering is requested
-    match config.dep_kinds {
+    // exit early when no dependency kinds filtering is requested
+    match config.keep_dep_kinds {
         None | Some(DepKinds::All) => return Ok(()),
         Some(_) => (),
     };
@@ -98,14 +98,14 @@ fn get_required_packages<'a>(
     config: &VendorFilter,
     platform: Option<&str>,
 ) -> Result<HashSet<(Cow<'a, str>, Cow<'a, cargo_metadata::semver::Version>)>> {
-    let dep_kinds = config.dep_kinds.expect("dep_kinds not set");
+    let keep_dep_kinds = config.keep_dep_kinds.expect("keep_dep_kinds not set");
     let mut required_packages = HashSet::new();
     for manifest_path in manifest_paths {
         let mut cargo_tree = std::process::Command::new("cargo");
         cargo_tree
             .arg("tree")
             .args(["--quiet", "--prefix", "none"]) // ignore non-relevant output
-            .args(["--edges", &dep_kinds.to_string()]); // key filter not available with metadata
+            .args(["--edges", &keep_dep_kinds.to_string()]); // key filter not available with metadata
         if offline {
             cargo_tree.arg("--offline");
         }
@@ -138,21 +138,22 @@ fn get_required_packages<'a>(
         let output_str = String::from_utf8(output.stdout).expect("Invalid cargo tree output");
         for line in output_str.lines() {
             let tokens: Vec<&str> = line.split(' ').collect();
-            if tokens.len() < 2 {
-                anyhow::bail!("Incomplete output {line} received from cargo tree");
+            let [package, version, ..] = tokens.as_slice() else {
+                anyhow::bail!("Invalid output received from cargo tree: {line}");
+            };
+            if version.len() < 5 || version.contains("feature") {
+                continue; // skip invalid entries and "feature" list
             }
-            let package = tokens[0].to_string();
             // need to remove the initial "v" character that the cargo tree is printing in package name
             // Ref: <https://doc.rust-lang.org/cargo/commands/cargo-tree.html>
             // The PR requesting the v to be removed (or configurable) was closed:
             // <https://github.com/rust-lang/cargo/issues/13120>
-            if tokens[1].len() < 5 || tokens[1].contains("feature") {
-                continue; // skip invalid entries and "feature" list
-            }
-            let version = &tokens[1][1..tokens[1].len()];
+            let version = version
+                .strip_prefix('v')
+                .with_context(|| format!("Invalid version: {}", tokens[1]))?;
             let version = cargo_metadata::semver::Version::parse(version)
-                .unwrap_or_else(|_| panic!("Cannot parse version {version} for {package}"));
-            required_packages.insert((Cow::Owned(package), Cow::Owned(version)));
+                .with_context(|| format!("Cannot parse version {version} for {package}"))?;
+            required_packages.insert((Cow::Owned(package.to_string()), Cow::Owned(version)));
         }
     }
     Ok(required_packages)
@@ -171,7 +172,7 @@ mod tests {
         let rp = get_required_packages(
             &vec![Some(&own_cargo_toml)],
             false,
-            &serde_json::from_value(json!({ "dep-kinds": "dev"})).unwrap(),
+            &serde_json::from_value(json!({ "keep-dep-kinds": "dev"})).unwrap(),
             Some("x86_64-pc-windows-gnu"),
         );
         match rp {
@@ -187,8 +188,9 @@ mod tests {
         let rp = get_required_packages(
             &vec![Some(&own_cargo_toml)],
             false,
-            &serde_json::from_value(json!({ "dep-kinds": "all", "--all-features": true})).unwrap(),
-            None,
+            &serde_json::from_value(json!({ "keep-dep-kinds": "all", "--all-features": true}))
+                .unwrap(),
+            None, // all platforms
         );
         match rp {
             Ok(rp) => assert!(rp.len() > 90), // all features, all platforms list is long
@@ -204,25 +206,55 @@ mod tests {
         let rp_normal = get_required_packages(
             &vec![Some(&own_cargo_toml)],
             false,
-            &serde_json::from_value(json!({ "dep-kinds": "normal"})).unwrap(),
+            &serde_json::from_value(json!({ "keep-dep-kinds": "normal"})).unwrap(),
             Some("x86_64-pc-windows-gnu"),
         );
 
-        // no-build => normal + dev dependencies, so including once_call and serial_test
+        // no-build => normal + dev dependencies, so including once_call, serial_test...
         let rp_no_build = get_required_packages(
             &vec![Some(&own_cargo_toml)],
             false,
-            &serde_json::from_value(json!({ "dep-kinds": "no-build"})).unwrap(),
+            &serde_json::from_value(json!({ "keep-dep-kinds": "no-build"})).unwrap(),
             Some("x86_64-pc-windows-gnu"),
         );
 
         // if once_cell is also a normal dependency, it is not removed from the list
         match (rp_normal, rp_no_build) {
-            (Ok(rp_normal), Ok(rp_all)) => assert!(
-                rp_normal.len() < rp_all.len(),
+            (Ok(rp_normal), Ok(rp_no_build)) => assert!(
+                rp_normal.len() < rp_no_build.len(),
                 "Filtering does not work. Got {} normal and {} no-build dependencies",
                 rp_normal.len(),
-                rp_all.len()
+                rp_no_build.len()
+            ),
+            _ => panic!("One of get_required_packages() calls failed"),
+        }
+    }
+
+    #[test]
+    fn test_dep_kind_build_vs_no_dev() {
+        let mut own_cargo_toml = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        own_cargo_toml.push("Cargo.toml");
+
+        let rp_build = get_required_packages(
+            &vec![Some(&own_cargo_toml)],
+            false,
+            &serde_json::from_value(json!({ "keep-dep-kinds": "build"})).unwrap(),
+            Some("x86_64-unknown-linux-gnu"),
+        );
+
+        // no-dev => build + normal so the list shall be larger
+        let rp_no_dev = get_required_packages(
+            &vec![Some(&own_cargo_toml)],
+            false,
+            &serde_json::from_value(json!({ "keep-dep-kinds": "no-dev"})).unwrap(),
+            Some("x86_64-unknown-linux-gnu"),
+        );
+        match (rp_build, rp_no_dev) {
+            (Ok(rp_build), Ok(rp_no_dev)) => assert!(
+                rp_build.len() < rp_no_dev.len(),
+                "Filtering does not work. Got {} build and {} no-dev dependencies",
+                rp_build.len(),
+                rp_no_dev.len()
             ),
             _ => panic!("One of get_required_packages() calls failed"),
         }

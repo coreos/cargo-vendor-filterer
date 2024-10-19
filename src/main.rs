@@ -16,7 +16,7 @@ use std::vec;
 
 use cargo_vendor_filterer::*;
 
-mod dep_kinds;
+mod dep_kinds_filtering;
 mod tiers;
 
 /// This is the .cargo-checksum.json in a crate/package.
@@ -132,7 +132,7 @@ struct VendorFilter {
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     features: Vec<String>,
     exclude_crate_paths: Option<HashSet<CrateExclude>>,
-    dep_kinds: Option<dep_kinds::DepKinds>,
+    keep_dep_kinds: Option<dep_kinds_filtering::DepKinds>,
 }
 
 #[derive(Parser, Debug)]
@@ -181,11 +181,11 @@ struct Args {
     #[arg(long, short = 'F')]
     features: Vec<String>,
 
-    /// Kinds of dependencies to keep (all, normal, build, dev, no-normal, no-build, no-dev)
-    ///
-    /// Syntax based on edges option of cargo tree.
+    /// Dependencies kinds you want to keep: normal, build and/or development (dev).
+    /// Possible values: all (default), normal, build, dev, no-normal, no-build, no-dev
+    /// Ref: <https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html>
     #[arg(long)]
-    dep_kinds: Option<dep_kinds::DepKinds>,
+    keep_dep_kinds: Option<dep_kinds_filtering::DepKinds>,
 
     /// Pick the output format.
     #[arg(long, default_value = "dir")]
@@ -346,7 +346,7 @@ impl VendorFilter {
             && !args.no_default_features
             && args.features.is_empty()
             && args.exclude_crate_path.is_none()
-            && args.dep_kinds.is_none();
+            && args.keep_dep_kinds.is_none();
         let exclude_crate_paths = args
             .exclude_crate_path
             .as_ref()
@@ -366,7 +366,7 @@ impl VendorFilter {
             no_default_features: args.no_default_features,
             features: args.features.clone(),
             exclude_crate_paths,
-            dep_kinds: args.dep_kinds,
+            keep_dep_kinds: args.keep_dep_kinds,
         });
         Ok(r)
     }
@@ -872,12 +872,12 @@ fn run() -> Result<()> {
                 &mut packages,
                 Some(platform),
             )?;
-            dep_kinds::filter_dep_kinds(&args, &config, &mut packages, Some(platform))?;
+            dep_kinds_filtering::filter_dep_kinds(&args, &config, &mut packages, Some(platform))?;
         }
         expanded_platforms = Some(platforms);
     } else {
         add_packages_for_platform(&args, &config, &all_packages, &mut packages, None)?;
-        dep_kinds::filter_dep_kinds(&args, &config, &mut packages, None)?;
+        dep_kinds_filtering::filter_dep_kinds(&args, &config, &mut packages, None)?;
     }
 
     // Run `cargo vendor` which will capture all dependencies.
@@ -951,8 +951,8 @@ fn run() -> Result<()> {
     } else if let Some(platforms) = expanded_platforms {
         eprintln!("Filtered to target platforms: {:?}", platforms);
     }
-    if let Some(dep_kinds) = config.dep_kinds {
-        eprintln!("Filtered to dependency kinds: {dep_kinds}");
+    if let Some(keep_dep_kinds) = config.keep_dep_kinds {
+        eprintln!("Filtered to dependency kinds: {keep_dep_kinds}");
     }
 
     eprintln!("Generated: {final_output_path}");
@@ -976,12 +976,12 @@ fn test_parse_config() {
     let valid = vec![
         json!({}),
         json!({ "platforms": ["aarch64-unknown-linux-gnu"]}),
-        json!({ "platforms": ["aarch64-unknown-linux-gnu"], "no-default-features": true, "dep-kinds": "all"}),
-        json!({ "platforms": ["*-unknown-linux-gnu"], "tier": "2", "no-default-features": false, "dep-kinds": "normal"}),
-        json!({ "platforms": ["*-unknown-linux-gnu"], "tier": "Two", "no-default-features": false, "dep-kinds": "build"}),
-        json!({ "platforms": ["aarch64-unknown-linux-gnu"], "all-features": true, "no-default-features": false, "dep-kinds": "dev"}),
-        json!({ "platforms": ["aarch64-unknown-linux-gnu"], "no-default-features": true, "dep-kinds": "no-build"}),
-        json!({ "platforms": ["aarch64-unknown-linux-gnu"], "no-default-features": true, "features": ["first-feature", "second-feature"], "dep-kinds": "no-build"}),
+        json!({ "platforms": ["aarch64-unknown-linux-gnu"], "no-default-features": true, "keep-dep-kinds": "all"}),
+        json!({ "platforms": ["*-unknown-linux-gnu"], "tier": "2", "no-default-features": false, "keep-dep-kinds": "normal"}),
+        json!({ "platforms": ["*-unknown-linux-gnu"], "tier": "Two", "no-default-features": false, "keep-dep-kinds": "build"}),
+        json!({ "platforms": ["aarch64-unknown-linux-gnu"], "all-features": true, "no-default-features": false, "keep-dep-kinds": "dev"}),
+        json!({ "platforms": ["aarch64-unknown-linux-gnu"], "no-default-features": true, "keep-dep-kinds": "no-build"}),
+        json!({ "platforms": ["aarch64-unknown-linux-gnu"], "no-default-features": true, "features": ["first-feature", "second-feature"], "keep-dep-kinds": "no-build"}),
     ];
     for case in valid {
         let _: VendorFilter = serde_json::from_value(case).unwrap();

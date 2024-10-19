@@ -28,7 +28,7 @@ fn windows_with_dep_kind_filter_normal() {
     let output = vendor(VendorOptions {
         output: Some(&test_folder),
         platforms: Some(&["x86_64-pc-windows-gnu"]),
-        dep_kinds: Some("normal"),
+        keep_dep_kinds: Some("normal"),
         ..Default::default()
     })
     .unwrap();

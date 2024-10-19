@@ -5,7 +5,14 @@ However, it doesn't offer any filtering; today cargo includes
 all platforms, but some projects only care about Linux
 for example.
 
-More information: https://github.com/rust-lang/cargo/issues/7058
+More information: <https://github.com/rust-lang/cargo/issues/7058>
+
+Additionally some projects are not interested by vendoring test code
+or development dependencies of used crates and these filters
+are also not supported with no development planned yet.
+
+More information: <https://github.com/rust-lang/cargo/issues/13474>
+or <https://github.com/rust-lang/cargo/issues/7065>
 
 ## Generating a vendor/ directory with filtering
 
@@ -26,13 +33,15 @@ $ cargo vendor-filterer --tier=2
 Currently this will drop out crates such as `redox_syscall`.
 
 You can also declaratively specify the desired vendor configuration via the [Cargo metadata](https://doc.rust-lang.org/cargo/reference/manifest.html#the-metadata-table)
-key `package.metadata.vendor-filter`.  In this example, we include only tier 1 and 2 Linux platforms, and additionally remove some vendored C sources and `tests` folders from all crates:
+key `package.metadata.vendor-filter`.  In this example, we include only tier 1 and 2 Linux platforms, and additionally remove some vendored C sources, `tests` folders
+and development dependencies from all crates:
 
 ```toml
 [package.metadata.vendor-filter]
 platforms = ["*-unknown-linux-gnu"]
 tier = "2"
 all-features = true
+keep_dep_kinds = "no-dev"
 exclude-crate-paths = [ { name = "curl-sys", exclude = "curl" },
                         { name = "libz-sys", exclude = "src/zlib" },
                         { name = "libz-sys", exclude = "src/smoke.c" },
@@ -51,6 +60,8 @@ key `workspace.metadata.vendor-filter`.
   and `*` wildcards are supported.  For example, `*-unknown-linux-gnu`.
 - `tier`: This can be either "1" or "2".  It may be specified in addition to `platforms`.
 - `all-features`: Enable all features of the current crate when vendoring.
+- `keep_dep_kinds`: Specify which dependencies kinds to keep.
+  Can be one of: all, normal, build, dev, no-normal, no-build, no-dev
 - `exclude-crate-paths`: Remove files and directories from target crates.  A key
   use case for this is removing the vendored copy of C libraries embedded in
   crates like `libz-sys`, when you only want to support dynamically linking.
