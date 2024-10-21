@@ -172,3 +172,22 @@ pub(crate) fn verify_no_macos(dir: &Utf8Path) {
     macos_lib.pop();
     assert_eq!(macos_lib.read_dir_utf8().unwrap().count(), 1);
 }
+
+pub(crate) fn verify_crate_is_no_stub(output_folder: &Utf8Path, name: &str) {
+    let crate_dir = output_folder.join(name);
+    assert!(
+        crate_dir.exists(),
+        "Package does not show up in the vendor dir"
+    );
+    let crate_lib = crate_dir.join("src/lib.rs");
+    assert!(
+        crate_lib.exists(),
+        "Package has no src/lib.rs-file in the vendor dir"
+    );
+    // Check that this was not filtered out
+    assert_ne!(
+        crate_lib.metadata().unwrap().len(),
+        0,
+        "Package was filtered out, when it shouldn't have been!"
+    );
+}

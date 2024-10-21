@@ -909,13 +909,20 @@ fn run() -> Result<()> {
     for (_name, mut pkgs) in pkgs_by_name {
         // Reverse sort - greater version is lower index
         pkgs.sort_by(|a, b| b.version.cmp(&a.version));
-        // SAFETY: The package set must be non-empty
-        let (first, rest) = pkgs.split_first().unwrap();
+        // If we use versioned-dirs, we insert all packages with a versioned filename
+        // If not, we split off the first package and insert it without a version-suffix
+        let versioned_pkgs = if !args.versioned_dirs {
+            // SAFETY: The package set must be non-empty
+            let (first, rest) = pkgs.split_first().unwrap();
+            if packages.contains_key(&first.id) {
+                package_filenames.insert(Cow::Borrowed(first.name.as_str()), *first);
+            }
+            rest
+        } else {
+            &pkgs
+        };
 
-        if packages.contains_key(&first.id) {
-            package_filenames.insert(Cow::Borrowed(first.name.as_str()), *first);
-        }
-        for &pkg in rest {
+        for pkg in versioned_pkgs {
             if packages.contains_key(&pkg.id) {
                 package_filenames.insert(Cow::Owned(package_versioned_filename(pkg)), pkg);
             }

@@ -1,4 +1,4 @@
-use crate::vendor_filterer::common::{verify_no_macos, verify_no_windows};
+use crate::vendor_filterer::common::{verify_crate_is_no_stub, verify_no_macos, verify_no_windows};
 
 use super::common::{tempdir, vendor, write_file_create_parents, VendorOptions};
 
@@ -264,12 +264,7 @@ fn filter_without_manifest_path() {
     })
     .unwrap();
     assert!(output.status.success());
-    let bitflags = output_folder.join("bitflags");
-    assert!(bitflags.exists());
-    let bitflags_lib = bitflags.join("src/lib.rs");
-    assert!(bitflags_lib.exists());
-    // Check that this was not filtered out
-    assert_ne!(bitflags_lib.metadata().unwrap().len(), 0);
+    verify_crate_is_no_stub(&output_folder, "bitflags");
 }
 
 #[test]
@@ -314,16 +309,6 @@ fn filter_without_manifest_but_sync() {
     })
     .unwrap();
     assert!(output.status.success());
-    let bitflags = output_folder.join("bitflags");
-    assert!(bitflags.exists());
-    let bitflags_lib = bitflags.join("src/lib.rs");
-    assert!(bitflags_lib.exists());
-    // Check that this was not filtered out
-    assert_ne!(bitflags_lib.metadata().unwrap().len(), 0);
-    let hex = output_folder.join("hex");
-    assert!(hex.exists());
-    let hex_lib = hex.join("src/lib.rs");
-    assert!(hex_lib.exists());
-    // Check that this was not filtered out
-    assert_ne!(hex_lib.metadata().unwrap().len(), 0);
+    verify_crate_is_no_stub(&output_folder, "bitflags");
+    verify_crate_is_no_stub(&output_folder, "hex");
 }
