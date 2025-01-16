@@ -19,6 +19,9 @@ use cargo_vendor_filterer::*;
 mod dep_kinds_filtering;
 mod tiers;
 
+/// The path to the stub library file we write
+const STUB_LIBRS: &str = "src/lib.rs";
+
 /// This is the .cargo-checksum.json in a crate/package.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct CargoChecksums {
@@ -222,6 +225,9 @@ struct Args {
 
 fn filter_manifest(manifest: &mut toml::Value) {
     if let Some(t) = manifest.as_table_mut() {
+        let mut libtable = toml::Table::new();
+        libtable.insert("path".into(), STUB_LIBRS.into());
+        t.insert("lib".into(), libtable.into());
         for &k in UNWANTED_MANIFEST_KEYS {
             t.remove(k);
         }
@@ -301,7 +307,7 @@ fn replace_with_stub(path: &Utf8Path) -> Result<()> {
     // An empty Cargo.toml
     writef(Utf8Path::new(CARGO_TOML), cargo_toml_data.as_bytes())?;
     // And an empty source file
-    writef(Utf8Path::new("src/lib.rs"), b"")?;
+    writef(Utf8Path::new(STUB_LIBRS), b"")?;
     // Finally, serialize the new checksums
     let mut w = std::fs::File::create(checksums_path).map(std::io::BufWriter::new)?;
     serde_json::to_writer(&mut w, &checksums)?;
@@ -1089,6 +1095,51 @@ name = "somebench"
     for &k in UNWANTED_MANIFEST_KEYS {
         assert!(!t.contains_key(k));
     }
+}
+
+/// Test case for https://github.com/coreos/cargo-vendor-filterer/issues/111
+#[test]
+fn test_filter_manifest_binonly() {
+    let mut v: toml::Value = toml::from_str(
+        r#"
+[package]
+name = "cxxbridge-cmd"
+version = "1.0.136"
+authors = ["David Tolnay <dtolnay@gmail.com>"]
+categories = ["development-tools::build-utils", "development-tools::ffi"]
+description = "C++ code generator for integrating `cxx` crate into a non-Cargo build."
+edition = "2021"
+exclude = ["build.rs"]
+homepage = "https://cxx.rs"
+keywords = ["ffi"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/dtolnay/cxx"
+rust-version = "1.73"
+
+[[bin]]
+name = "cxxbridge"
+path = "src/main.rs"
+
+[features]
+# incomplete features that are not covered by a compatibility guarantee:
+experimental-async-fn = []
+
+[dependencies]
+clap = { version = "4.3.11", default-features = false, features = ["error-context", "help", "std", "suggestions", "usage"] }
+codespan-reporting = "0.11.1"
+proc-macro2 = { version = "1.0.74", default-features = false, features = ["span-locations"] }
+quote = { version = "1.0.35", default-features = false }
+syn = { version = "2.0.46", default-features = false, features = ["clone-impls", "full", "parsing", "printing"] }
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+"#,
+    )
+    .unwrap();
+    filter_manifest(&mut v);
+    let table = v.as_table().unwrap();
+    assert!(table.get("bin").is_none());
+    assert!(table.get("lib").is_some());
 }
 
 #[test]
