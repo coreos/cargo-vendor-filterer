@@ -18,7 +18,7 @@ env:
 
 jobs:
   build-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -57,7 +57,7 @@ jobs:
       - name: Test
         run: cargo test --all-features -- --nocapture --quiet
   clippy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -71,7 +71,7 @@ jobs:
         run: cargo clippy -- -D warnings
   # Verify that we can successfully vendor selected crates
   test-crates:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build-test
     strategy:
       matrix:
@@ -104,4 +104,4 @@ jobs:
           rm -rf vendor
           cargo-vendor-filterer --platform x86_64-unknown-linux-gnu --no-default-features ${{ matrix.args }} > .cargo/config.toml
       # This runs without networking, verifying we're building using vendored deps
-      - run: rm ~/.cargo/{registry,git} -rf && unshare -Umn cargo check --offline
+      - run: rm ~/.cargo/{registry,git} -rf && unshare -Umn --propagation=unchanged cargo check --offline
