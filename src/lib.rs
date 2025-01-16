@@ -24,6 +24,8 @@ pub const RESPECT_SOURCE_CONFIG: &str = "--respect-source-config";
 pub const VERSIONED_DIRS: &str = "--versioned-dirs";
 /// The package entry
 pub const MANIFEST_KEY_PACKAGE: &str = "package";
+/// The well-known cargo target for a library
+pub const LIB: &str = "lib";
 /// Extra targets which we need to remove because Cargo validates them and will
 /// error out when we've replaced the library with a stub.
 pub const UNWANTED_MANIFEST_KEYS: &[&str] = &["bin", "example", "test", "bench"];
