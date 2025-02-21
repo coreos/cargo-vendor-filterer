@@ -174,11 +174,9 @@ mod tests {
             false,
             &serde_json::from_value(json!({ "keep-dep-kinds": "dev"})).unwrap(),
             Some("x86_64-pc-windows-gnu"),
-        );
-        match rp {
-            Ok(rp) => assert_eq!(rp.len(), 3), // own package + once_cell + serial_test dev dependencies
-            Err(e) => panic!("Got error: {e:?}"),
-        }
+        )
+        .unwrap();
+        assert_eq!(rp.len(), 3); // own package + once_cell + serial_test dev dependencies
     }
 
     #[test]
@@ -191,11 +189,9 @@ mod tests {
             &serde_json::from_value(json!({ "keep-dep-kinds": "all", "--all-features": true}))
                 .unwrap(),
             None, // all platforms
-        );
-        match rp {
-            Ok(rp) => assert!(rp.len() > 90), // all features, all platforms list is long
-            Err(e) => panic!("Got error: {e:?}"),
-        }
+        )
+        .unwrap();
+        assert!(rp.len() > 90); // all features, all platforms list is long
     }
 
     #[test]
@@ -208,7 +204,8 @@ mod tests {
             false,
             &serde_json::from_value(json!({ "keep-dep-kinds": "normal"})).unwrap(),
             Some("x86_64-pc-windows-gnu"),
-        );
+        )
+        .unwrap();
 
         // no-build => normal + dev dependencies, so including once_call, serial_test...
         let rp_no_build = get_required_packages(
@@ -216,18 +213,16 @@ mod tests {
             false,
             &serde_json::from_value(json!({ "keep-dep-kinds": "no-build"})).unwrap(),
             Some("x86_64-pc-windows-gnu"),
-        );
+        )
+        .unwrap();
 
         // if once_cell is also a normal dependency, it is not removed from the list
-        match (rp_normal, rp_no_build) {
-            (Ok(rp_normal), Ok(rp_no_build)) => assert!(
-                rp_normal.len() < rp_no_build.len(),
-                "Filtering does not work. Got {} normal and {} no-build dependencies",
-                rp_normal.len(),
-                rp_no_build.len()
-            ),
-            _ => panic!("One of get_required_packages() calls failed"),
-        }
+        assert!(
+            rp_normal.len() < rp_no_build.len(),
+            "Filtering does not work. Got {} normal and {} no-build dependencies",
+            rp_normal.len(),
+            rp_no_build.len()
+        );
     }
 
     #[test]
@@ -240,7 +235,8 @@ mod tests {
             false,
             &serde_json::from_value(json!({ "keep-dep-kinds": "build"})).unwrap(),
             Some("x86_64-unknown-linux-gnu"),
-        );
+        )
+        .unwrap();
 
         // no-dev => build + normal so the list shall be larger
         let rp_no_dev = get_required_packages(
@@ -248,15 +244,13 @@ mod tests {
             false,
             &serde_json::from_value(json!({ "keep-dep-kinds": "no-dev"})).unwrap(),
             Some("x86_64-unknown-linux-gnu"),
+        )
+        .unwrap();
+        assert!(
+            rp_build.len() < rp_no_dev.len(),
+            "Filtering does not work. Got {} build and {} no-dev dependencies",
+            rp_build.len(),
+            rp_no_dev.len()
         );
-        match (rp_build, rp_no_dev) {
-            (Ok(rp_build), Ok(rp_no_dev)) => assert!(
-                rp_build.len() < rp_no_dev.len(),
-                "Filtering does not work. Got {} build and {} no-dev dependencies",
-                rp_build.len(),
-                rp_no_dev.len()
-            ),
-            _ => panic!("One of get_required_packages() calls failed"),
-        }
     }
 }
