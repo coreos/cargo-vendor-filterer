@@ -28,7 +28,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
 tempfile = "3.3.0"
 smallvec = "1.9.0"
-tar = "0.4.38"
+tar = { version = "0.4.38", default-features = false }
 either = "1.7.0"
 walkdir = "2.3.3"
 serde_ignored = "0.1.7"
