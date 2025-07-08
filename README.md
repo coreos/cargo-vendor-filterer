@@ -44,9 +44,11 @@ all-features = true
 keep-dep-kinds = "no-dev"
 exclude-crate-paths = [ { name = "curl-sys", exclude = "curl" },
                         { name = "libz-sys", exclude = "src/zlib" },
-                        { name = "libz-sys", exclude = "src/smoke.c" },
+                        { name = "libz-sys", exclude = "src/*.c" },
                         { name = "libz-sys", exclude = "src/zlib-ng" },
+                        { name = "ring", exclude = "pregenerated/*.o" },
                         { name = "*", exclude = "tests" },
+                        { name = "*", exclude = "*.md" },
                       ]
 ```
 
@@ -66,6 +68,7 @@ key `workspace.metadata.vendor-filter`.
   use case for this is removing the vendored copy of C libraries embedded in
   crates like `libz-sys`, when you only want to support dynamically linking.
   `*` wildcard removes the folder from all creates (typical use case for `tests` folder).
+  Supports glob patterns like `*.o`, `src/*.c`, or `**/*.a` for pattern-based exclusions.
 
 All of these options have corresponding CLI flags; see `cargo vendor-filterer --help`.
 
