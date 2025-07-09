@@ -6,6 +6,7 @@ use cargo_metadata::{
 };
 use clap::Parser;
 use either::Either;
+use glob::glob;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::borrow::Cow;
@@ -396,50 +397,97 @@ fn gather_config(args: &Args) -> Result<Option<VendorFilter>> {
     }
 }
 
+/// Find all paths matching a glob pattern within a base directory
+fn find_glob_matches(base_path: &Utf8Path, pattern: &str) -> Result<Vec<Utf8PathBuf>> {
+    let full_pattern = base_path.join(pattern);
+    let mut matches = Vec::new();
+    let pattern_str = full_pattern.as_str();
+    for entry in glob(pattern_str).with_context(|| format!("Invalid glob pattern: {pattern}"))? {
+        let path =
+            entry.with_context(|| format!("Error reading glob match for pattern: {pattern}"))?;
+
+        if let Some(utf8_path) = Utf8Path::from_path(&path) {
+            if let Ok(relative_path) = utf8_path.strip_prefix(base_path) {
+                matches.push(relative_path.to_path_buf());
+            }
+        }
+    }
+    Ok(matches)
+}
+
 /// Given a crate, remove matching files/directories in excludes.
 fn process_excludes(path: &Utf8PathBuf, name: &str, excludes: &HashSet<&str>) -> Result<()> {
     let mut matched = false;
-    for exclude in excludes.iter().map(Utf8Path::new) {
-        if exclude.is_absolute() {
+    let mut removed_patterns = Vec::new();
+
+    for &exclude in excludes.iter() {
+        if Utf8Path::new(exclude).is_absolute() {
             anyhow::bail!("Invalid absolute path in crate exclude {name} {exclude}");
         }
-        let path = path.join(exclude);
-
-        let meta = match path.symlink_metadata() {
-            Ok(r) => Ok(Some(r)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(e),
-        }?;
-        if let Some(meta) = meta {
-            if meta.is_dir() {
-                std::fs::remove_dir_all(path)?;
-            } else {
-                std::fs::remove_file(path)?;
+        let paths_to_remove = match find_glob_matches(path, exclude) {
+            Ok(matches) => {
+                if matches.is_empty() {
+                    eprintln!("Warning: No match for exclude for crate {name}: {exclude}");
+                }
+                matches
             }
-            eprintln!("Removed from crate {name}: {exclude}");
-            matched = true;
-        } else {
-            eprintln!("Warning: No match for exclude for crate {name}: {exclude}");
+            Err(e) => {
+                eprintln!("Warning: Failed to process exclude for crate {name}: {exclude} - {e}");
+                continue;
+            }
+        };
+
+        for relative_path in paths_to_remove {
+            let full_path = path.join(&relative_path);
+            let meta = match full_path.symlink_metadata() {
+                Ok(r) => Ok(Some(r)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(e) => Err(e),
+            }?;
+            if let Some(meta) = meta {
+                if meta.is_dir() {
+                    std::fs::remove_dir_all(&full_path)
+                        .with_context(|| format!("Failed to remove directory: {}", full_path))?;
+                } else {
+                    std::fs::remove_file(&full_path)
+                        .with_context(|| format!("Failed to remove file: {}", full_path))?;
+                }
+                eprintln!("Removed from crate {name}: {}", relative_path);
+                matched = true;
+                removed_patterns.push(relative_path);
+            }
         }
     }
+
     if matched {
-        let checksums_path = path.join(CARGO_CHECKSUM);
-        let checksums = std::fs::File::open(&checksums_path).map(BufReader::new)?;
-        let mut checksums: CargoChecksums = serde_json::from_reader(checksums)
-            .with_context(|| format!("Parsing {checksums_path}"))?;
-        let orig = checksums.files.len();
-        checksums.files.retain(|k, _| {
-            let k = Utf8Path::new(k);
-            for exclude in excludes.iter().map(Utf8Path::new) {
-                if k.starts_with(exclude) {
-                    return false;
-                }
+        update_checksums_for_removed_paths(path, &removed_patterns)?;
+    }
+    Ok(())
+}
+
+/// Update checksums file to remove entries for deleted paths
+fn update_checksums_for_removed_paths(
+    path: &Utf8PathBuf,
+    removed_patterns: &[Utf8PathBuf],
+) -> Result<()> {
+    let checksums_path = path.join(CARGO_CHECKSUM);
+    let checksums = std::fs::File::open(&checksums_path).map(BufReader::new)?;
+    let mut checksums: CargoChecksums =
+        serde_json::from_reader(checksums).with_context(|| format!("Parsing {checksums_path}"))?;
+    let orig = checksums.files.len();
+    checksums.files.retain(|k, _| {
+        let k = Utf8Path::new(k);
+        for removed_pattern in removed_patterns {
+            if k.starts_with(removed_pattern) || k == removed_pattern {
+                return false;
             }
-            true
-        });
-        assert_ne!(orig, checksums.files.len());
+        }
+        true
+    });
+    if orig != checksums.files.len() {
         let mut w = std::fs::File::create(checksums_path).map(std::io::BufWriter::new)?;
         serde_json::to_writer(&mut w, &checksums)?;
+        w.flush()?;
     }
     Ok(())
 }
@@ -1146,4 +1194,41 @@ targets = ["x86_64-unknown-linux-gnu"]
 fn test_cli() {
     use clap::CommandFactory;
     Args::command().debug_assert()
+}
+
+#[test]
+fn test_find_glob_matches() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let base_path = Utf8Path::from_path(temp_dir.path()).unwrap();
+    std::fs::create_dir_all(base_path.join("src")).unwrap();
+    std::fs::create_dir_all(base_path.join("tests")).unwrap();
+    std::fs::write(base_path.join("src/lib.rs"), "// lib").unwrap();
+    std::fs::write(base_path.join("src/main.rs"), "// main").unwrap();
+    std::fs::write(base_path.join("tests/test1.rs"), "// test1").unwrap();
+    std::fs::write(base_path.join("README.md"), "# README").unwrap();
+    std::fs::write(base_path.join("Cargo.toml"), "[package]").unwrap();
+    let matches = find_glob_matches(base_path, "src/*.rs").unwrap();
+    assert_eq!(matches.len(), 2);
+    assert!(matches.contains(&Utf8PathBuf::from("src/lib.rs")));
+    assert!(matches.contains(&Utf8PathBuf::from("src/main.rs")));
+    let matches = find_glob_matches(base_path, "*.md").unwrap();
+    assert_eq!(matches.len(), 1);
+    assert!(matches.contains(&Utf8PathBuf::from("README.md")));
+    let matches = find_glob_matches(base_path, "nonexistent/*.txt").unwrap();
+    assert!(matches.is_empty());
+}
+
+#[test]
+fn test_crate_exclude_glob_parsing() {
+    let exclude = CrateExclude::parse_str("mylib#src/lib.rs").unwrap();
+    assert_eq!(exclude.name, "mylib");
+    assert_eq!(exclude.exclude, "src/lib.rs");
+
+    let exclude = CrateExclude::parse_str("mylib#src/*.rs").unwrap();
+    assert_eq!(exclude.name, "mylib");
+    assert_eq!(exclude.exclude, "src/*.rs");
+
+    let exclude = CrateExclude::parse_str("*#tests/*").unwrap();
+    assert_eq!(exclude.name, "*");
+    assert_eq!(exclude.exclude, "tests/*");
 }
