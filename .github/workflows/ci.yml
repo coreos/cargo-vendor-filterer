@@ -14,7 +14,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  ACTIONS_LINTS_TOOLCHAIN: 1.78.0
+  ACTIONS_LINTS_TOOLCHAIN: 1.82.0
 
 jobs:
   build-test:
@@ -96,7 +96,7 @@ jobs:
           repository: ${{ matrix.repo }}
           ref: ${{ matrix.tag }}
       # For netavark
-      - run: sudo apt install protobuf-compiler
+      - run: sudo apt update && sudo apt install protobuf-compiler
       - run: |
           mkdir -p .cargo && cargo-vendor-filterer --platform x86_64-unknown-linux-gnu --all-features > .cargo/config.toml
           rm -rf vendor
