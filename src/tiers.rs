@@ -40,7 +40,7 @@ const TIER2: &[&str] = &[
 /// The possible values of select Rust platform "tiers".
 /// There is a third tier, but this API is about limited/curated tiers.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub(crate) enum Tier {
+pub enum Tier {
     #[serde(alias = "1")]
     One,
     #[serde(alias = "2")]
@@ -49,7 +49,7 @@ pub(crate) enum Tier {
 
 impl Tier {
     /// List the targets for this tier.
-    pub(crate) fn targets(&self) -> impl Iterator<Item = &'static str> {
+    pub fn targets(&self) -> impl Iterator<Item = &'static str> {
         match self {
             Tier::One => either::Left(TIER1.iter()),
             Tier::Two => either::Right(TIER1.iter().chain(TIER2.iter())),
