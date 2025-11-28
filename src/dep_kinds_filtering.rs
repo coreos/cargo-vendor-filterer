@@ -137,6 +137,11 @@ fn get_required_packages<'a>(
         }
         let output_str = String::from_utf8(output.stdout).expect("Invalid cargo tree output");
         for line in output_str.lines() {
+            if line.trim().is_empty() {
+                // `cargo tree` output from a `[workspace]` with multiple
+                // `members` will contain blank lines that must be skipped.
+                continue;
+            }
             let tokens: Vec<&str> = line.split(' ').collect();
             let [package, version, ..] = tokens.as_slice() else {
                 anyhow::bail!("Invalid output received from cargo tree: {line}");
