@@ -60,7 +60,7 @@ impl fmt::Display for VendorFormat {
 }
 
 #[derive(Default)]
-pub(crate) struct VendorOptions<'a, 'b, 'c, 'd, 'e> {
+pub(crate) struct VendorOptions<'a, 'b, 'c, 'd, 'e, 'f> {
     pub output: Option<&'a Utf8Path>,
     pub platforms: Option<&'b [&'b str]>,
     pub tier: Option<&'static str>,
@@ -70,6 +70,7 @@ pub(crate) struct VendorOptions<'a, 'b, 'c, 'd, 'e> {
     pub sync: Vec<&'e Utf8Path>,
     pub versioned_dirs: bool,
     pub keep_dep_kinds: Option<&'static str>,
+    pub current_dir: Option<&'f Utf8Path>,
 }
 
 /// Run a vendoring process
@@ -83,7 +84,7 @@ pub(crate) fn vendor(options: VendorOptions) -> Result<Output> {
     let mut program = build_root()?;
     program.push(format!("cargo-{SELF_NAME}"));
     let mut cmd = Command::new(&program);
-    cmd.current_dir(project_root()?).arg(SELF_NAME);
+    cmd.current_dir(options.current_dir.unwrap_or(project_root()?.as_path())).arg(SELF_NAME);
     if let Some(platforms) = options.platforms {
         cmd.args(platforms.iter().map(|&p| format!("--platform={p}")));
     }
