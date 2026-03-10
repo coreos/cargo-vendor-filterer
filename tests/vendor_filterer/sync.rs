@@ -282,6 +282,7 @@ fn filter_without_manifest_but_sync() {
 
         [dependencies]
         bitflags = "1.3"
+        hex = "0.4"
     "#,
     )
     .unwrap();
