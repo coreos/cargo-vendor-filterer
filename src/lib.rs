@@ -536,6 +536,28 @@ fn git_source_date_epoch(dir: &Utf8Path) -> Result<u64> {
     Ok(r)
 }
 
+/// Determine the source date epoch for reproducible builds.
+/// Checks SOURCE_DATE_EPOCH first, then falls back to git.
+/// Returns an error if neither is available.
+fn determine_source_date_epoch() -> Result<Cow<'static, str>> {
+    if let Ok(v) = std::env::var("SOURCE_DATE_EPOCH") {
+        if !v.is_empty() {
+            return Ok(Cow::Owned(v));
+        }
+    }
+    match git_source_date_epoch(Utf8Path::new(".")) {
+        Ok(v) => Ok(Cow::Owned(v.to_string())),
+        Err(e) => {
+            anyhow::bail!(
+                "Failed to determine source date epoch.\n\
+                 Set SOURCE_DATE_EPOCH environment variable, or ensure git is \
+                 available and the current directory is a git repository.\n\
+                 Details: {e}"
+            );
+        }
+    }
+}
+
 /// Generate a reproducible tarball with optional zstd compression.
 fn generate_tar_from(
     srcdir: &Utf8Path,
@@ -545,19 +567,9 @@ fn generate_tar_from(
 ) -> Result<()> {
     const GZIP_MTIME: u32 = 0;
     const GZIP_COMPRESSION: u32 = 6; // default level of the CLI
-    let envkey = "SOURCE_DATE_EPOCH";
-    let source_date_epoch_env = std::env::var_os(envkey);
-    let source_date_epoch_env = source_date_epoch_env
-        .as_ref()
-        .map(|v| {
-            v.to_str()
-                .map(Cow::Borrowed)
-                .ok_or_else(|| anyhow!("Invalid value for {envkey}"))
-        })
-        .transpose()?;
-    let source_date_epoch = source_date_epoch_env.map(Ok).unwrap_or_else(|| {
-        git_source_date_epoch(Utf8Path::new(".")).map(|v| Cow::Owned(v.to_string()))
-    })?;
+
+    let source_date_epoch = determine_source_date_epoch()
+        .context("Failed to determine source date epoch for reproducible tarball")?;
     let timestamp: u64 = source_date_epoch.parse()?;
 
     let output = std::fs::File::create(dest)?;
