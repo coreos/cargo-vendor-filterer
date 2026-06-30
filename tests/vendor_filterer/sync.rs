@@ -256,10 +256,10 @@ fn filter_without_manifest_path() {
     )
     .unwrap();
     write_file_create_parents(&dep_a, "src/lib.rs", "").unwrap();
-    assert!(std::env::set_current_dir(&dep_a).is_ok());
     let output_folder = test_folder.join("vendor");
     let output = vendor(VendorOptions {
         output: Some(&output_folder),
+        current_dir: Some(&dep_a),
         ..Default::default()
     })
     .unwrap();
@@ -300,11 +300,11 @@ fn filter_without_manifest_but_sync() {
     )
     .unwrap();
     write_file_create_parents(&dep_b, "src/lib.rs", "").unwrap();
-    assert!(std::env::set_current_dir(&dep_a).is_ok());
     let output_folder = test_folder.join("vendor");
     let output = vendor(VendorOptions {
         output: Some(&output_folder),
         sync: vec![&manifest_b],
+        current_dir: Some(&dep_a),
         ..Default::default()
     })
     .unwrap();
