@@ -37,6 +37,8 @@ pub const CARGO_TOML: &str = "Cargo.toml";
 pub const CARGO_CHECKSUM: &str = ".cargo-checksum.json";
 /// The CLI argument passed to cargo to work offline
 pub const OFFLINE: &str = "--offline";
+/// The CLI argument passed to cargo to assert that `Cargo.lock` will remain unchanged
+pub const LOCKED: &str = "--locked";
 /// The CLI argument passed to cargo to work with multiple Cargo.toml-files
 pub const SYNC: &str = "--sync";
 /// The CLI argument passed to `cargo vendor` to respect override of the `crates.io` source when downloading crates
@@ -237,6 +239,10 @@ pub struct Args {
     /// Run without accessing the network; this is passed down to e.g. `cargo metadata --offline`.
     #[arg(long)]
     pub offline: bool,
+
+    /// Assert that `Cargo.lock` will remain unchanged
+    #[arg(long)]
+    pub locked: bool,
 
     /// Instead of ignoring [source] configuration by default in `.cargo/config.toml` read it and
     /// use it when downloading crates from crates.io, for example
@@ -965,6 +971,7 @@ pub fn run(args: Args) -> Result<()> {
     builder
         .args(["vendor"])
         .args(args.offline.then_some(OFFLINE))
+        .args(args.locked.then_some(LOCKED))
         .args(args.respect_source_config.then_some(RESPECT_SOURCE_CONFIG))
         .args(args.versioned_dirs.then_some(VERSIONED_DIRS))
         .args(manifest_path.iter().flatten());
