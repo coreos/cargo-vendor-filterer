@@ -21,7 +21,9 @@ pub(crate) fn project_root() -> Result<Utf8PathBuf> {
         if found_lock_file {
             return Ok(path);
         }
-        path.pop();
+        if !path.pop() {
+            break;
+        }
     }
     bail!(io::Error::from(io::ErrorKind::NotFound))
 }
