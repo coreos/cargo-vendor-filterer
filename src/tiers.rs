@@ -31,6 +31,7 @@ const TIER2: &[&str] = &[
     "powerpc64le-unknown-linux-gnu",
     "riscv64gc-unknown-linux-gnu",
     "s390x-unknown-linux-gnu",
+    "wasm32-unknown-unknown",
     "x86_64-unknown-freebsd",
     "x86_64-unknown-illumos",
     "x86_64-unknown-linux-musl",
