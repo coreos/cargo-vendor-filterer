@@ -15,7 +15,6 @@ use std::io::{BufReader, Write};
 use std::process::Command;
 use std::vec;
 
-
 mod dep_kinds_filtering;
 mod tiers;
 
@@ -65,21 +64,6 @@ struct CargoChecksums {
     package: Option<String>,
 }
 
-/// The minimal bits of Cargo.toml we need.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-struct CargoManifest {
-    package: CargoPackage,
-    features: BTreeMap<String, Vec<String>>,
-}
-
-/// The minimal bits of the `[package]` section in Cargo.toml we need.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-struct CargoPackage {
-    name: String,
-    version: String,
-    edition: String,
-}
-
 /// Types of tar compression we support; gzip for compatibility, zstd is the modern baseline.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum Compression {
@@ -104,9 +88,10 @@ impl Compression {
 }
 
 /// Output format; the default is a directory.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub enum OutputTarget {
     /// Write to a directory; the default path is `vendor`
+    #[default]
     Dir,
     /// Write to an uncompressed (reproducible) tar archive; the default path is vendor.tar
     Tar,
@@ -114,12 +99,6 @@ pub enum OutputTarget {
     TarGzip,
     /// Write to a zstd-compressed (reproducible) tarball; the default path is vendor.tar.zstd
     TarZstd,
-}
-
-impl Default for OutputTarget {
-    fn default() -> Self {
-        Self::Dir
-    }
 }
 
 impl clap::ValueEnum for OutputTarget {
@@ -914,7 +893,6 @@ fn package_versioned_filename(p: &Package) -> String {
 
 /// An inner version of `main`; the primary code.
 pub fn run(args: Args) -> Result<()> {
-
     let (had_config, config) = if let Some(c) = gather_config(&args)? {
         (true, c)
     } else {
@@ -1079,7 +1057,6 @@ pub fn run(args: Args) -> Result<()> {
     eprintln!("Generated: {final_output_path}");
     Ok(())
 }
-
 
 #[test]
 fn test_parse_config() {
