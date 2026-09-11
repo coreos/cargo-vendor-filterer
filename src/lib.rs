@@ -53,7 +53,7 @@ pub const LIB: &str = "lib";
 /// error out when we've replaced the library with a stub.
 pub const UNWANTED_MANIFEST_KEYS: &[&str] = &["bin", "example", "test", "bench"];
 /// Cargo also checks these keys in the package section
-pub const UNWANTED_PACKAGE_KEYS: &[&str] = &["links", "build"];
+pub const UNWANTED_PACKAGE_KEYS: &[&str] = &["links", "build", "default-run"];
 
 /// The path to the stub library file we write
 const STUB_LIBRS: &str = "src/lib.rs";
@@ -1239,6 +1239,31 @@ targets = ["x86_64-unknown-linux-gnu"]
     let table = v.as_table().unwrap();
     assert!(table.get("bin").is_none());
     assert!(table.get("lib").is_some());
+}
+
+#[test]
+fn test_filter_manifest_default_run() {
+    let mut v: toml::Value = toml::from_str(
+        r#"
+[package]
+name = "rav1e"
+version = "0.7.1"
+default-run = "rav1e"
+
+[[bin]]
+name = "rav1e"
+path = "src/bin/rav1e.rs"
+"#,
+    )
+    .unwrap();
+    filter_manifest(&mut v);
+    let table = v.as_table().unwrap();
+    assert!(table.get("bin").is_none());
+    let package = table
+        .get(MANIFEST_KEY_PACKAGE)
+        .and_then(|p| p.as_table())
+        .unwrap();
+    assert!(package.get("default-run").is_none());
 }
 
 #[test]
