@@ -1,5 +1,5 @@
-use clap::Parser;
 use cargo_vendor_filterer::{run, Args, SELF_NAME};
+use clap::Parser;
 
 /// Output
 fn main() {

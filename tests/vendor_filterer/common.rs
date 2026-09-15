@@ -86,7 +86,8 @@ pub(crate) fn vendor(options: VendorOptions) -> Result<Output> {
     let mut program = build_root()?;
     program.push(format!("cargo-{SELF_NAME}"));
     let mut cmd = Command::new(&program);
-    cmd.current_dir(options.current_dir.unwrap_or(project_root()?.as_path())).arg(SELF_NAME);
+    cmd.current_dir(options.current_dir.unwrap_or(project_root()?.as_path()))
+        .arg(SELF_NAME);
     if let Some(platforms) = options.platforms {
         cmd.args(platforms.iter().map(|&p| format!("--platform={p}")));
     }
