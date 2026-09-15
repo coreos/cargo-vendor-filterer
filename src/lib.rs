@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use cargo_metadata::{
     CargoOpt::{AllFeatures, NoDefaultFeatures, SomeFeatures},
@@ -168,8 +168,9 @@ struct VendorFilter {
     all_features: bool,
     #[serde(default)]
     no_default_features: bool,
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    features: Vec<String>,
+    // `None` retains the historical catalog-based keep set. An explicitly empty
+    // list instead requests graph filtering with Cargo's default features.
+    features: Option<Vec<String>>,
     exclude_crate_paths: Option<HashSet<CrateExclude>>,
     keep_dep_kinds: Option<dep_kinds_filtering::DepKinds>,
 }
@@ -353,6 +354,13 @@ fn replace_with_stub(path: &Utf8Path) -> Result<()> {
 }
 
 impl VendorFilter {
+    /// Whether Cargo's resolved graph, rather than its package catalog, selects
+    /// packages to retain. `features = []` deliberately opts in so metadata can
+    /// distinguish it from an omitted `features` key.
+    fn enables_feature_filtering(&self) -> bool {
+        self.all_features || self.no_default_features || self.features.is_some()
+    }
+
     /// Returns true if this configuration will filter by platform
     fn enables_platform_filtering(&self) -> bool {
         self.tier.is_some()
@@ -407,7 +415,10 @@ impl VendorFilter {
             tier: args.tier.clone(),
             all_features: args.all_features,
             no_default_features: args.no_default_features,
-            features: args.features.clone(),
+            // Clap represents an absent `--features` as an empty vector. An
+            // explicitly empty shell argument is a one-element vector, so it
+            // still opts into filtering with Cargo's default features.
+            features: (!args.features.is_empty()).then(|| args.features.clone()),
             exclude_crate_paths,
             keep_dep_kinds: args.keep_dep_kinds,
         });
@@ -752,8 +763,12 @@ fn get_packages_for_features(
         if config.no_default_features {
             command.features(NoDefaultFeatures);
         }
-        if !config.features.is_empty() {
-            command.features(SomeFeatures(config.features.clone()));
+        if let Some(features) = config
+            .features
+            .as_ref()
+            .filter(|features| !features.is_empty())
+        {
+            command.features(SomeFeatures(features.clone()));
         }
         let meta = command.exec().context("Executing cargo metadata")?;
         meta.packages
@@ -764,6 +779,53 @@ fn get_packages_for_features(
             });
     }
     Ok(packages)
+}
+
+/// Return the packages reachable from the selected workspace members.
+fn reachable_packages<'p, T>(
+    resolve: &cargo_metadata::Resolve,
+    mut pending: Vec<cargo_metadata::PackageId>,
+    all_packages: &'p HashMap<cargo_metadata::PackageId, T>,
+) -> Result<HashMap<cargo_metadata::PackageId, &'p T>> {
+    let nodes: HashMap<_, _> = resolve.nodes.iter().map(|node| (&node.id, node)).collect();
+    let mut packages = HashMap::new();
+    while let Some(id) = pending.pop() {
+        if packages.contains_key(&id) {
+            continue;
+        }
+        let node = nodes
+            .get(&id)
+            .with_context(|| format!("Resolved dependency graph does not contain package {id}"))?;
+        pending.extend(node.dependencies.iter().cloned());
+        let package = all_packages
+            .get(&id)
+            .with_context(|| format!("Package catalog does not contain resolved package {id}"))?;
+        packages.insert(id, package);
+    }
+    Ok(packages)
+}
+
+fn select_packages<'p, T>(
+    config: &VendorFilter,
+    resolve: Option<&cargo_metadata::Resolve>,
+    workspace_members: Vec<cargo_metadata::PackageId>,
+    metadata_packages: impl IntoIterator<Item = cargo_metadata::PackageId>,
+    all_packages: &'p HashMap<cargo_metadata::PackageId, T>,
+) -> Result<HashMap<cargo_metadata::PackageId, &'p T>> {
+    if config.enables_feature_filtering() {
+        let resolve = resolve.context("Missing resolved dependency graph")?;
+        reachable_packages(resolve, workspace_members, all_packages)
+    } else {
+        metadata_packages
+            .into_iter()
+            .map(|id| {
+                let package = all_packages.get(&id).with_context(|| {
+                    format!("Package catalog does not contain metadata package {id}")
+                })?;
+                Ok((id, package))
+            })
+            .collect()
+    }
 }
 
 /// Using the filter configuration, add references to the `packages` map that
@@ -784,21 +846,27 @@ fn add_packages_for_platform<'p>(
         if config.no_default_features {
             command.features(NoDefaultFeatures);
         }
-        if !config.features.is_empty() {
-            command.features(SomeFeatures(config.features.clone()));
+        if let Some(features) = config
+            .features
+            .as_ref()
+            .filter(|features| !features.is_empty())
+        {
+            command.features(SomeFeatures(features.clone()));
         }
         if let Some(platform) = platform {
             command.other_options(vec![format!("--filter-platform={platform}")]);
         }
 
         let meta = command.exec().context("Executing cargo metadata")?;
-        for package in meta.packages {
-            let package = all_packages
-                .get(&package.id)
-                .ok_or_else(|| anyhow!("Failed to find package {}", package.name))
-                .unwrap();
-            packages.insert(package.id.clone(), package);
-        }
+        let metadata_packages = meta.packages.into_iter().map(|package| package.id);
+        let resolve = meta.resolve;
+        packages.extend(select_packages(
+            config,
+            resolve.as_ref(),
+            meta.workspace_members,
+            metadata_packages,
+            all_packages,
+        )?);
     }
     Ok(())
 }
@@ -1080,6 +1148,48 @@ pub fn run(args: Args) -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn test_feature_filtering_selects_resolved_packages_only_when_enabled() {
+    use cargo_metadata::PackageId;
+    use serde_json::json;
+
+    let resolve = serde_json::from_value(json!({
+        "nodes": [
+            { "id": "root", "dependencies": ["rustls-webpki"] },
+            { "id": "rustls-webpki", "dependencies": ["aws-lc-rs"] },
+            { "id": "aws-lc-rs", "dependencies": [] },
+            { "id": "ring", "dependencies": [] },
+        ],
+        "root": "root",
+    }))
+    .unwrap();
+    let package_id = |repr: &str| PackageId {
+        repr: repr.to_owned(),
+    };
+    let catalog: HashMap<PackageId, ()> = ["root", "rustls-webpki", "aws-lc-rs", "ring"]
+        .map(|name| (package_id(name), ()))
+        .into();
+
+    let omitted = VendorFilter::default();
+    let metadata_packages = catalog.keys().cloned();
+    let actual = select_packages(&omitted, None, vec![], metadata_packages, &catalog).unwrap();
+    assert_eq!(actual.len(), catalog.len());
+
+    let empty: VendorFilter = serde_json::from_value(json!({ "features": [] })).unwrap();
+    let metadata_packages = catalog.keys().cloned();
+    let actual = select_packages(
+        &empty,
+        Some(&resolve),
+        vec![package_id("root")],
+        metadata_packages,
+        &catalog,
+    )
+    .unwrap();
+    let expected = ["root", "rustls-webpki", "aws-lc-rs"]
+        .map(package_id)
+        .into();
+    assert_eq!(actual.keys().cloned().collect::<HashSet<_>>(), expected);
+}
 
 #[test]
 fn test_parse_config() {
@@ -1101,6 +1211,69 @@ fn test_parse_config() {
     let filter = json!({ "exclude-crate-paths": [ { "name": "hex", "exclude": "benches" }, { "name": "curl", "exclude": "curl" } ]});
     let r: VendorFilter = serde_json::from_value(filter).unwrap();
     assert_eq!(r.exclude_crate_paths.unwrap().len(), 2);
+}
+
+#[test]
+fn test_feature_filtering_requires_an_explicit_feature_option() {
+    use serde_json::json;
+
+    for (config, expected) in [
+        (json!({}), false),
+        (
+            json!({ "all-features": false, "no-default-features": false }),
+            false,
+        ),
+        (json!({ "features": [] }), true),
+        (json!({ "features": ["feature"] }), true),
+        (json!({ "no-default-features": true }), true),
+        (json!({ "all-features": true }), true),
+    ] {
+        let filter: VendorFilter = serde_json::from_value(config).unwrap();
+        assert_eq!(filter.enables_feature_filtering(), expected);
+    }
+
+    let omitted: VendorFilter = serde_json::from_value(json!({})).unwrap();
+    let empty: VendorFilter = serde_json::from_value(json!({ "features": [] })).unwrap();
+    assert_eq!(omitted.features, None);
+    assert_eq!(empty.features, Some(vec![]));
+
+    let platform_only = Args {
+        platform: Some(vec!["x86_64-unknown-linux-gnu".into()]),
+        ..Default::default()
+    };
+    assert!(!VendorFilter::parse_args(&platform_only)
+        .unwrap()
+        .unwrap()
+        .enables_feature_filtering());
+
+    // The CLI requests graph filtering for a feature argument (including an
+    // explicitly empty shell argument) or either enabled feature boolean.
+    for args in [
+        Args {
+            features: vec!["feature".into()],
+            ..Default::default()
+        },
+        Args {
+            features: vec![String::new()],
+            ..Default::default()
+        },
+        Args {
+            no_default_features: true,
+            ..Default::default()
+        },
+        Args {
+            all_features: true,
+            ..Default::default()
+        },
+    ] {
+        assert!(VendorFilter::parse_args(&args)
+            .unwrap()
+            .unwrap()
+            .enables_feature_filtering());
+    }
+    assert!(VendorFilter::parse_args(&Args::default())
+        .unwrap()
+        .is_none());
 }
 
 #[test]
