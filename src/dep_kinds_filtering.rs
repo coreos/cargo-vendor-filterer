@@ -118,8 +118,12 @@ fn get_required_packages<'a>(
         if config.no_default_features {
             cargo_tree.arg("--no-default-features");
         }
-        if !config.features.is_empty() {
-            cargo_tree.arg("--features").args(&config.features);
+        if let Some(features) = config
+            .features
+            .as_ref()
+            .filter(|features| !features.is_empty())
+        {
+            cargo_tree.arg("--features").args(features);
         }
         match platform {
             Some(platform) => cargo_tree.arg(format!("--target={platform}")),

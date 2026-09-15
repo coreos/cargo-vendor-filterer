@@ -194,3 +194,20 @@ pub(crate) fn verify_crate_is_no_stub(output_folder: &Utf8Path, name: &str) {
         "Package was filtered out, when it shouldn't have been!"
     );
 }
+
+pub(crate) fn verify_crate_is_stub(output_folder: &Utf8Path, name: &str) {
+    let crate_dir = output_folder.join(name);
+    let crate_lib = crate_dir.join("src/lib.rs");
+    assert!(
+        crate_lib.exists(),
+        "package {name} has no src/lib.rs in the vendor directory"
+    );
+    assert_eq!(
+        crate_lib
+            .metadata()
+            .expect("failed to read vendored crate metadata")
+            .len(),
+        0,
+        "package {name} was retained instead of being replaced with a stub"
+    );
+}

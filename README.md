@@ -61,7 +61,14 @@ key `workspace.metadata.vendor-filter`.
   e.g. `cargo metadata --filter-platform`.  You can specify multiple values,
   and `*` wildcards are supported.  For example, `*-unknown-linux-gnu`.
 - `tier`: This can be either "1" or "2".  It may be specified in addition to `platforms`.
-- `all-features`: Enable all features of the current crate when vendoring.
+- `all-features`: Enable all features of the current crate and opt into
+  resolved-graph filtering.
+- `no-default-features`: Do not enable the current crate's `default` feature when
+  resolving packages to retain. This also opts into resolved-graph filtering.
+- `features`: Enable these features of the current crate when resolving packages
+  to retain. An omitted key retains the historical package-catalog behavior;
+  `features = []` instead opts into resolved-graph filtering with Cargo's default
+  features. A nonempty list opts in and enables those features.
 - `keep-dep-kinds`: Specify which dependencies kinds to keep.
   Can be one of: all, normal, build, dev, no-normal, no-build, no-dev
 - `exclude-crate-paths`: Remove files and directories from target crates.  A key
@@ -70,7 +77,8 @@ key `workspace.metadata.vendor-filter`.
   `*` wildcard removes the folder from all creates (typical use case for `tests` folder).
   Supports glob patterns like `*.o`, `src/*.c`, or `**/*.a` for pattern-based exclusions.
 
-All of these options have corresponding CLI flags; see `cargo vendor-filterer --help`.
+These options have corresponding CLI flags; see `cargo vendor-filterer --help`.
+From a shell, `--features ''` is equivalent to `features = []`.
 
 ## Generating reproducible vendor tarballs
 
