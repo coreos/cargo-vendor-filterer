@@ -243,7 +243,10 @@ pub struct Args {
     pub sync: Option<Vec<Utf8PathBuf>>,
 }
 
-fn filter_manifest(manifest: &mut toml::Value) {
+/// Rewrite the manifest of a stub crate. Returns the keys removed from the
+/// package section together with their values, e.g. `links = "ssl"`.
+fn filter_manifest(manifest: &mut toml::Value) -> Vec<(&'static str, toml::Value)> {
+    let mut removed = Vec::new();
     if let Some(t) = manifest.as_table_mut() {
         let mut libtable = toml::Table::new();
         libtable.insert("path".into(), STUB_LIBRS.into());
@@ -256,10 +259,13 @@ fn filter_manifest(manifest: &mut toml::Value) {
             .and_then(|v| v.as_table_mut())
         {
             for &k in UNWANTED_PACKAGE_KEYS {
-                t.remove(k);
+                if let Some(v) = t.remove(k) {
+                    removed.push((k, v));
+                }
             }
         }
     }
+    removed
 }
 
 /// Compute the SHA-256 digest of the buffer and return the result in hexadecimal format
@@ -291,13 +297,15 @@ fn sha256_hexdigest(buf: &[u8]) -> Result<String> {
 /// The generated package will fail to compile, but we're relying on it
 /// not actually being compiled.  Entirely removing the crates would
 /// require editing the dependent crates, which would be more involved.
-fn replace_with_stub(path: &Utf8Path) -> Result<()> {
+///
+/// Returns the keys removed from the package section of the manifest.
+fn replace_with_stub(path: &Utf8Path) -> Result<Vec<(&'static str, toml::Value)>> {
     let cargo_toml_path = path.join(CARGO_TOML);
     let cargo_toml_data =
         std::fs::read_to_string(&cargo_toml_path).context("Reading Cargo.toml")?;
     let mut cargo_toml_data: toml::Value =
         toml::from_str(&cargo_toml_data).with_context(|| format!("Parsing {cargo_toml_path}"))?;
-    filter_manifest(&mut cargo_toml_data);
+    let removed = filter_manifest(&mut cargo_toml_data);
 
     let checksums_path = path.join(CARGO_CHECKSUM);
     let checksums = std::fs::File::open(&checksums_path).map(BufReader::new)?;
@@ -329,7 +337,7 @@ fn replace_with_stub(path: &Utf8Path) -> Result<()> {
     let mut w = std::fs::File::create(checksums_path).map(std::io::BufWriter::new)?;
     serde_json::to_writer(&mut w, &checksums)?;
     w.flush()?;
-    Ok(())
+    Ok(removed)
 }
 
 impl VendorFilter {
@@ -933,8 +941,17 @@ fn delete_unreferenced_packages(
         pbuf.push(name);
 
         if !package_filenames.contains_key(&Cow::Borrowed(name)) {
-            replace_with_stub(&pbuf).with_context(|| format!("Replacing with stub: {name}"))?;
+            let removed =
+                replace_with_stub(&pbuf).with_context(|| format!("Replacing with stub: {name}"))?;
             eprintln!("Replacing unreferenced package with stub: {name}");
+            for (key, value) in removed {
+                // `build = false` only says there is no build script, which
+                // holds for the stub as well, so nothing is lost.
+                if value.as_bool() == Some(false) {
+                    continue;
+                }
+                eprintln!("Removed from stub {name}: package.{key} = {value}");
+            }
             assert!(unreferenced.insert(name.to_string()));
         }
 
@@ -1413,6 +1430,36 @@ path = "src/bin/rav1e.rs"
         .and_then(|p| p.as_table())
         .unwrap();
     assert!(package.get("default-run").is_none());
+}
+
+#[test]
+fn test_filter_manifest_package_keys() {
+    let mut v: toml::Value = toml::from_str(
+        r#"
+[package]
+name = "openssl-sys"
+version = "0.9.109"
+build = "build/main.rs"
+links = "openssl"
+"#,
+    )
+    .unwrap();
+    let removed: Vec<_> = filter_manifest(&mut v)
+        .iter()
+        .map(|(k, v)| format!("{k} = {v}"))
+        .collect();
+    assert_eq!(
+        removed,
+        [r#"links = "openssl""#, r#"build = "build/main.rs""#]
+    );
+    let package = v
+        .get(MANIFEST_KEY_PACKAGE)
+        .and_then(|p| p.as_table())
+        .unwrap();
+    for &k in UNWANTED_PACKAGE_KEYS {
+        assert!(!package.contains_key(k), "unexpected {k}");
+    }
+    assert!(filter_manifest(&mut v).is_empty());
 }
 
 #[test]
