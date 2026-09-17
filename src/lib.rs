@@ -261,6 +261,19 @@ pub struct Args {
     /// Additional `Cargo.toml` to sync and vendor
     #[arg(short, long, value_name = "TOML")]
     pub sync: Option<Vec<Utf8PathBuf>>,
+
+    /// Write a JSON report of the packages replaced with a stub to this file.
+    /// Their paths are relative to the vendor directory; what was filtered out
+    /// of such a package is in its own Cargo.toml.pre-vendor-filter.
+    #[arg(long, value_name = "PATH")]
+    pub json: Option<Utf8PathBuf>,
+}
+
+/// The report written with `--json`.
+#[derive(Debug, Serialize)]
+struct Report {
+    /// The packages replaced with a stub, relative to the vendor directory
+    stubs: BTreeSet<String>,
 }
 
 /// Rewrite the manifest of a stub crate. Returns the keys removed from the
@@ -979,15 +992,16 @@ fn expand_platforms<'b>(
     Ok(r)
 }
 
-/// Deletes unreferenced packages from the vendor directory.
+/// Deletes unreferenced packages from the vendor directory. Returns the
+/// directories of the packages replaced with a stub.
 fn delete_unreferenced_packages(
     output_dir: &Utf8Path,
     package_filenames: &BTreeMap<Cow<'_, str>, &Package>,
     excludes: &HashMap<&str, HashSet<&str>>,
-) -> Result<()> {
+) -> Result<BTreeSet<String>> {
     // A reusable buffer (silly optimization to avoid allocating lots of path buffers)
     let mut pbuf = Utf8PathBuf::from(&output_dir);
-    let mut unreferenced = HashSet::new();
+    let mut unreferenced = BTreeSet::new();
 
     // Deleting files while iterating a `read_dir` produces undefined behaviour.
     let mut entries = Vec::new();
@@ -1026,7 +1040,7 @@ fn delete_unreferenced_packages(
         debug_assert!(r);
     }
 
-    Ok(())
+    Ok(unreferenced)
 }
 
 /// Return the filename cargo vendor would use for a package which has multiple versions present
@@ -1173,7 +1187,7 @@ pub fn run(args: Args) -> Result<()> {
         }
     }
 
-    delete_unreferenced_packages(&output_dir, &package_filenames, &excludes)?;
+    let stubs = delete_unreferenced_packages(&output_dir, &package_filenames, &excludes)?;
 
     // For tar archives, generate them now from the temporary directory.
     let prefix = args.prefix.as_deref();
@@ -1195,6 +1209,17 @@ pub fn run(args: Args) -> Result<()> {
     }
     if let Some(keep_dep_kinds) = config.keep_dep_kinds {
         eprintln!("Filtered to dependency kinds: {keep_dep_kinds}");
+    }
+
+    if let Some(report_path) = args.json.as_deref() {
+        let report = Report { stubs };
+        let mut w = std::fs::File::create(report_path)
+            .map(std::io::BufWriter::new)
+            .with_context(|| format!("Creating {report_path}"))?;
+        serde_json::to_writer_pretty(&mut w, &report)?;
+        writeln!(w)?;
+        w.flush()?;
+        eprintln!("Wrote: {report_path}");
     }
 
     eprintln!("Generated: {final_output_path}");

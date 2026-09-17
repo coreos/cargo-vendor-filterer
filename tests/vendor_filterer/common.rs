@@ -65,7 +65,7 @@ impl fmt::Display for VendorFormat {
 }
 
 #[derive(Default)]
-pub(crate) struct VendorOptions<'a, 'b, 'c, 'd, 'e, 'f> {
+pub(crate) struct VendorOptions<'a, 'b, 'c, 'd, 'e, 'f, 'g> {
     pub output: Option<&'a Utf8Path>,
     pub platforms: Option<&'b [&'b str]>,
     pub tier: Option<&'static str>,
@@ -76,6 +76,7 @@ pub(crate) struct VendorOptions<'a, 'b, 'c, 'd, 'e, 'f> {
     pub versioned_dirs: bool,
     pub keep_dep_kinds: Option<&'static str>,
     pub current_dir: Option<&'f Utf8Path>,
+    pub json: Option<&'g Utf8Path>,
 }
 
 /// Run a vendoring process
@@ -121,6 +122,9 @@ pub(crate) fn vendor(options: VendorOptions) -> Result<Output> {
     }
     if options.versioned_dirs {
         cmd.arg(VERSIONED_DIRS);
+    }
+    if let Some(json) = options.json {
+        cmd.arg(format!("--json={json}"));
     }
 
     Ok({

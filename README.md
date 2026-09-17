@@ -107,6 +107,21 @@ is lost:
 | `Cargo.toml.pre-vendor-filter` | the manifest as `cargo vendor` wrote it |
 | `Cargo.toml.orig` | the manifest as written by the developer, which every vendored package carries |
 
+With `--json=PATH`, the packages replaced with a stub are also listed in a JSON
+file, so that tooling does not have to walk the vendor directory to find them:
+
+```json
+{
+  "stubs": [
+    "libmimalloc-sys",
+    "windows_x86_64_msvc"
+  ]
+}
+```
+
+The paths are relative to the vendor directory; what was filtered out of a
+package is in its own `Cargo.toml.pre-vendor-filter`.
+
 ## Generating reproducible vendor tarballs
 
 You can also provide `--format=tar.zstd` to output a reproducible tar archive
