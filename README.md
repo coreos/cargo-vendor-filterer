@@ -80,6 +80,33 @@ key `workspace.metadata.vendor-filter`.
 These options have corresponding CLI flags; see `cargo vendor-filterer --help`.
 From a shell, `--features ''` is equivalent to `features = []`.
 
+## Packages replaced with a stub
+
+A package which is filtered out stays in the vendor directory as a stub: its
+`Cargo.toml` and an empty `src/lib.rs`, so that `Cargo.lock` still resolves.
+The generated `Cargo.toml` starts with a comment saying where it comes from,
+marks the package as a stub and lists the keys removed from its `[package]`
+section. Those keys have to go, because cargo would look for a build script or
+binaries the stub does not have:
+
+```toml
+[package.metadata.vendor-filter]
+stub = true
+
+[package.metadata.vendor-filter.removed-package-keys]
+build = "build/main.rs"
+links = "openssl"
+```
+
+A stub keeps the manifests it was generated from, so that nothing filtered out
+is lost:
+
+| File | Contents |
+| ---- | -------- |
+| `Cargo.toml` | the manifest after `cargo vendor` and the filtering |
+| `Cargo.toml.pre-vendor-filter` | the manifest as `cargo vendor` wrote it |
+| `Cargo.toml.orig` | the manifest as written by the developer, which every vendored package carries |
+
 ## Generating reproducible vendor tarballs
 
 You can also provide `--format=tar.zstd` to output a reproducible tar archive
