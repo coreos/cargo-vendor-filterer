@@ -8,7 +8,10 @@ use anyhow::bail;
 use anyhow::Result;
 use camino;
 use camino::{Utf8Path, Utf8PathBuf};
-use cargo_vendor_filterer::{SELF_NAME, VERSIONED_DIRS};
+use cargo_vendor_filterer::{
+    CARGO_TOML, CARGO_TOML_PRE_VENDOR_FILTER, CONFIG_KEY, MANIFEST_KEY_PACKAGE, SELF_NAME,
+    STUB_KEY, STUB_REMOVED_PACKAGE_KEYS, UNWANTED_PACKAGE_KEYS, VERSIONED_DIRS,
+};
 
 // Return the project root
 pub(crate) fn project_root() -> Result<Utf8PathBuf> {
@@ -62,7 +65,7 @@ impl fmt::Display for VendorFormat {
 }
 
 #[derive(Default)]
-pub(crate) struct VendorOptions<'a, 'b, 'c, 'd, 'e, 'f> {
+pub(crate) struct VendorOptions<'a, 'b, 'c, 'd, 'e, 'f, 'g> {
     pub output: Option<&'a Utf8Path>,
     pub platforms: Option<&'b [&'b str]>,
     pub tier: Option<&'static str>,
@@ -73,6 +76,7 @@ pub(crate) struct VendorOptions<'a, 'b, 'c, 'd, 'e, 'f> {
     pub versioned_dirs: bool,
     pub keep_dep_kinds: Option<&'static str>,
     pub current_dir: Option<&'f Utf8Path>,
+    pub json: Option<&'g Utf8Path>,
 }
 
 /// Run a vendoring process
@@ -118,6 +122,9 @@ pub(crate) fn vendor(options: VendorOptions) -> Result<Output> {
     }
     if options.versioned_dirs {
         cmd.arg(VERSIONED_DIRS);
+    }
+    if let Some(json) = options.json {
+        cmd.arg(format!("--json={json}"));
     }
 
     Ok({
@@ -177,38 +184,62 @@ pub(crate) fn verify_no_macos(dir: &Utf8Path) {
     assert_eq!(macos_lib.read_dir_utf8().unwrap().count(), 1);
 }
 
+/// Whether the vendored package is marked as a stub in its manifest.
+pub(crate) fn is_stub(output_folder: &Utf8Path, name: &str) -> bool {
+    let manifest = fs::read_to_string(output_folder.join(name).join(CARGO_TOML))
+        .unwrap_or_else(|e| panic!("failed to read the manifest of package {name}: {e}"));
+    let manifest: toml::Value = toml::from_str(&manifest)
+        .unwrap_or_else(|e| panic!("failed to parse the manifest of package {name}: {e}"));
+    manifest
+        .get(MANIFEST_KEY_PACKAGE)
+        .and_then(|p| p.get("metadata"))
+        .and_then(|m| m.get(CONFIG_KEY))
+        .and_then(|f| f.get(STUB_KEY))
+        .and_then(toml::Value::as_bool)
+        == Some(true)
+}
+
 pub(crate) fn verify_crate_is_no_stub(output_folder: &Utf8Path, name: &str) {
     let crate_dir = output_folder.join(name);
     assert!(
         crate_dir.exists(),
         "Package does not show up in the vendor dir"
     );
-    let crate_lib = crate_dir.join("src/lib.rs");
     assert!(
-        crate_lib.exists(),
-        "Package has no src/lib.rs-file in the vendor dir"
-    );
-    // Check that this was not filtered out
-    assert_ne!(
-        crate_lib.metadata().unwrap().len(),
-        0,
+        !is_stub(output_folder, name),
         "Package was filtered out, when it shouldn't have been!"
+    );
+    assert!(
+        !crate_dir.join(CARGO_TOML_PRE_VENDOR_FILTER).exists(),
+        "package {name} kept a pre-filter manifest, but is no stub"
     );
 }
 
 pub(crate) fn verify_crate_is_stub(output_folder: &Utf8Path, name: &str) {
-    let crate_dir = output_folder.join(name);
-    let crate_lib = crate_dir.join("src/lib.rs");
     assert!(
-        crate_lib.exists(),
-        "package {name} has no src/lib.rs in the vendor directory"
-    );
-    assert_eq!(
-        crate_lib
-            .metadata()
-            .expect("failed to read vendored crate metadata")
-            .len(),
-        0,
+        is_stub(output_folder, name),
         "package {name} was retained instead of being replaced with a stub"
     );
+    let original = output_folder.join(name).join(CARGO_TOML_PRE_VENDOR_FILTER);
+    assert!(
+        original.exists(),
+        "package {name} has no {CARGO_TOML_PRE_VENDOR_FILTER} in the vendor directory"
+    );
+    let original = fs::read_to_string(&original).expect("failed to read the pre-filter manifest");
+    let original: toml::Value =
+        toml::from_str(&original).expect("failed to parse the pre-filter manifest");
+    // The keys removed from the package section are recorded in the stub.
+    let package = original.get(MANIFEST_KEY_PACKAGE).unwrap();
+    let stub = fs::read_to_string(output_folder.join(name).join(CARGO_TOML)).unwrap();
+    let stub: toml::Value = toml::from_str(&stub).unwrap();
+    let recorded = &stub[MANIFEST_KEY_PACKAGE]["metadata"][CONFIG_KEY];
+    for &key in UNWANTED_PACKAGE_KEYS {
+        if let Some(value) = package.get(key) {
+            assert_eq!(
+                recorded[STUB_REMOVED_PACKAGE_KEYS].get(key),
+                Some(value),
+                "package {name} does not record the removed {key}"
+            );
+        }
+    }
 }

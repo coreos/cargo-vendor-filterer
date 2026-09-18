@@ -3,6 +3,7 @@ pub mod common;
 mod exclude;
 mod features;
 mod format;
+mod json;
 mod platform;
 mod sync;
 mod toml;
