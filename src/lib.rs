@@ -282,7 +282,7 @@ struct Report {
 /// The stub is marked with `stub = true` in `package.metadata.vendor-filter`,
 /// where the removed keys are recorded as well, so that tools can tell a stub
 /// from a real package by its manifest.
-fn filter_manifest(manifest: &mut toml::Value) -> Vec<(&'static str, toml::Value)> {
+fn filter_manifest(manifest: &mut toml::Value) -> Result<Vec<(&'static str, toml::Value)>> {
     let mut removed = Vec::new();
     if let Some(t) = manifest.as_table_mut() {
         let mut libtable = toml::Table::new();
@@ -300,28 +300,29 @@ fn filter_manifest(manifest: &mut toml::Value) -> Vec<(&'static str, toml::Value
                     removed.push((k, v));
                 }
             }
-            if let Some(filter) = t
+            // Without the marker the stub could not be told from a real
+            // package, so refuse metadata it cannot be added to.
+            let metadata = t
                 .entry("metadata")
                 .or_insert_with(|| toml::Table::new().into())
                 .as_table_mut()
-                .and_then(|m| {
-                    m.entry(CONFIG_KEY)
-                        .or_insert_with(|| toml::Table::new().into())
-                        .as_table_mut()
-                })
-            {
-                filter.insert(STUB_KEY.into(), true.into());
-                if !removed.is_empty() {
-                    let keys = removed.iter().map(|(k, v)| (k.to_string(), v.clone()));
-                    filter.insert(
-                        STUB_REMOVED_PACKAGE_KEYS.into(),
-                        toml::Table::from_iter(keys).into(),
-                    );
-                }
+                .ok_or_else(|| anyhow::anyhow!("package.metadata is not a table"))?;
+            let filter = metadata
+                .entry(CONFIG_KEY)
+                .or_insert_with(|| toml::Table::new().into())
+                .as_table_mut()
+                .ok_or_else(|| anyhow::anyhow!("package.metadata.{CONFIG_KEY} is not a table"))?;
+            filter.insert(STUB_KEY.into(), true.into());
+            if !removed.is_empty() {
+                let keys = removed.iter().map(|(k, v)| (k.to_string(), v.clone()));
+                filter.insert(
+                    STUB_REMOVED_PACKAGE_KEYS.into(),
+                    toml::Table::from_iter(keys).into(),
+                );
             }
         }
     }
-    removed
+    Ok(removed)
 }
 
 /// Compute the SHA-256 digest of the buffer and return the result in hexadecimal format
@@ -361,7 +362,8 @@ fn replace_with_stub(path: &Utf8Path) -> Result<Vec<(&'static str, toml::Value)>
         std::fs::read_to_string(&cargo_toml_path).context("Reading Cargo.toml")?;
     let mut cargo_toml_data: toml::Value =
         toml::from_str(&original_manifest).with_context(|| format!("Parsing {cargo_toml_path}"))?;
-    let removed = filter_manifest(&mut cargo_toml_data);
+    let removed = filter_manifest(&mut cargo_toml_data)
+        .with_context(|| format!("Rewriting {cargo_toml_path}"))?;
 
     // The manifest as written by the developer, which the other vendored
     // packages keep as well. Packages published by older cargo have none.
@@ -1440,7 +1442,7 @@ name = "somebench"
     for &k in UNWANTED_MANIFEST_KEYS {
         assert!(t.contains_key(k), "expected {k}");
     }
-    filter_manifest(&mut v);
+    filter_manifest(&mut v).unwrap();
     let t = v.as_table().unwrap();
     for &k in UNWANTED_MANIFEST_KEYS {
         assert!(!t.contains_key(k));
@@ -1486,7 +1488,7 @@ targets = ["x86_64-unknown-linux-gnu"]
 "#,
     )
     .unwrap();
-    filter_manifest(&mut v);
+    filter_manifest(&mut v).unwrap();
     let table = v.as_table().unwrap();
     assert!(table.get("bin").is_none());
     assert!(table.get("lib").is_some());
@@ -1507,7 +1509,7 @@ path = "src/bin/rav1e.rs"
 "#,
     )
     .unwrap();
-    filter_manifest(&mut v);
+    filter_manifest(&mut v).unwrap();
     let table = v.as_table().unwrap();
     assert!(table.get("bin").is_none());
     let package = table
@@ -1530,6 +1532,7 @@ links = "openssl"
     )
     .unwrap();
     let removed: Vec<_> = filter_manifest(&mut v)
+        .unwrap()
         .iter()
         .map(|(k, v)| format!("{k} = {v}"))
         .collect();
@@ -1544,7 +1547,7 @@ links = "openssl"
     for &k in UNWANTED_PACKAGE_KEYS {
         assert!(!package.contains_key(k), "unexpected {k}");
     }
-    assert!(filter_manifest(&mut v).is_empty());
+    assert!(filter_manifest(&mut v).unwrap().is_empty());
 }
 
 #[test]
@@ -1562,7 +1565,7 @@ targets = ["x86_64-unknown-linux-gnu"]
 "#,
     )
     .unwrap();
-    filter_manifest(&mut v);
+    filter_manifest(&mut v).unwrap();
     let v: toml::Value = toml::from_str(&toml::to_string(&v).unwrap()).unwrap();
     let metadata = &v[MANIFEST_KEY_PACKAGE]["metadata"];
     assert_eq!(metadata[CONFIG_KEY][STUB_KEY].as_bool(), Some(true));
@@ -1577,12 +1580,30 @@ targets = ["x86_64-unknown-linux-gnu"]
 
     // A package without such keys is marked all the same.
     let mut v: toml::Value = toml::from_str("[package]\nname = \"foo\"\n").unwrap();
-    assert!(filter_manifest(&mut v).is_empty());
+    assert!(filter_manifest(&mut v).unwrap().is_empty());
     let filter = v[MANIFEST_KEY_PACKAGE]["metadata"][CONFIG_KEY]
         .as_table()
         .unwrap();
     assert_eq!(filter[STUB_KEY].as_bool(), Some(true));
     assert!(!filter.contains_key(STUB_REMOVED_PACKAGE_KEYS));
+}
+
+#[test]
+fn test_filter_manifest_metadata_not_a_table() {
+    for (manifest, error) in [
+        (
+            "[package]\nname = \"foo\"\nmetadata = \"bar\"\n",
+            "package.metadata is not a table",
+        ),
+        (
+            "[package]\nname = \"foo\"\n\n[package.metadata]\nvendor-filter = 1\n",
+            "package.metadata.vendor-filter is not a table",
+        ),
+    ] {
+        let mut v: toml::Value = toml::from_str(manifest).unwrap();
+        let e = filter_manifest(&mut v).unwrap_err();
+        assert_eq!(e.to_string(), error);
+    }
 }
 
 #[test]
