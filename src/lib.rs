@@ -994,6 +994,13 @@ fn expand_platforms<'b>(
     Ok(r)
 }
 
+/// Whether a key removed from the manifest of a stub is worth reporting.
+/// `build = false` only says there is no build script, which holds for the
+/// stub as well, so nothing is lost. For other keys `false` may matter.
+fn is_worth_reporting(key: &str, value: &toml::Value) -> bool {
+    !(key == "build" && value.as_bool() == Some(false))
+}
+
 /// Deletes unreferenced packages from the vendor directory. Returns the
 /// directories of the packages replaced with a stub.
 fn delete_unreferenced_packages(
@@ -1021,12 +1028,9 @@ fn delete_unreferenced_packages(
                 replace_with_stub(&pbuf).with_context(|| format!("Replacing with stub: {name}"))?;
             eprintln!("Replacing unreferenced package with stub: {name}");
             for (key, value) in removed {
-                // `build = false` only says there is no build script, which
-                // holds for the stub as well, so nothing is lost.
-                if value.as_bool() == Some(false) {
-                    continue;
+                if is_worth_reporting(key, &value) {
+                    eprintln!("Removed from stub {name}: package.{key} = {value}");
                 }
-                eprintln!("Removed from stub {name}: package.{key} = {value}");
             }
             assert!(unreferenced.insert(name.to_string()));
         }
@@ -1586,6 +1590,15 @@ targets = ["x86_64-unknown-linux-gnu"]
         .unwrap();
     assert_eq!(filter[STUB_KEY].as_bool(), Some(true));
     assert!(!filter.contains_key(STUB_REMOVED_PACKAGE_KEYS));
+}
+
+#[test]
+fn test_is_worth_reporting() {
+    assert!(!is_worth_reporting("build", &false.into()));
+    assert!(is_worth_reporting("build", &"build.rs".into()));
+    assert!(is_worth_reporting("links", &"openssl".into()));
+    // Only build is special, false may matter for any other key.
+    assert!(is_worth_reporting("default-run", &false.into()));
 }
 
 #[test]
