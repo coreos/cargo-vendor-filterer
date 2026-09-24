@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 use cargo_metadata::{
     CargoOpt::{AllFeatures, NoDefaultFeatures, SomeFeatures},
     MetadataCommand, Package,
@@ -508,6 +508,13 @@ fn gather_config(args: &Args) -> Result<Option<VendorFilter>> {
 
 /// Find all paths matching a glob pattern within a base directory
 fn find_glob_matches(base_path: &Utf8Path, pattern: &str) -> Result<Vec<Utf8PathBuf>> {
+    // glob drops `.` components from the paths it yields (`./vendor/foo`
+    // becomes `vendor/foo`), so drop them from the base path as well, or
+    // strip_prefix() below would reject every match.
+    let base_path = &base_path
+        .components()
+        .filter(|c| *c != Utf8Component::CurDir)
+        .collect::<Utf8PathBuf>();
     let full_pattern = base_path.join(pattern);
     let mut matches = Vec::new();
     let pattern_str = full_pattern.as_str();
@@ -1712,6 +1719,21 @@ fn test_find_glob_matches() {
     assert!(matches.contains(&Utf8PathBuf::from("README.md")));
     let matches = find_glob_matches(base_path, "nonexistent/*.txt").unwrap();
     assert!(matches.is_empty());
+}
+
+#[test]
+fn test_find_glob_matches_curdir() {
+    // A relative base path starting with `./`, as in `cargo vendor-filterer ./vendor`.
+    let temp_dir = tempfile::TempDir::new_in(".").unwrap();
+    let name = temp_dir.path().file_name().unwrap().to_str().unwrap();
+    let base_path = Utf8PathBuf::from(format!("./{name}/crate"));
+    std::fs::create_dir_all(base_path.join("src")).unwrap();
+    std::fs::write(base_path.join("src/lib.rs"), "// lib").unwrap();
+    std::fs::write(base_path.join("README.md"), "# README").unwrap();
+    let matches = find_glob_matches(&base_path, "*.md").unwrap();
+    assert_eq!(matches, vec![Utf8PathBuf::from("README.md")]);
+    let matches = find_glob_matches(&base_path, "src/lib.rs").unwrap();
+    assert_eq!(matches, vec![Utf8PathBuf::from("src/lib.rs")]);
 }
 
 #[test]
