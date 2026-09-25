@@ -1143,14 +1143,24 @@ pub fn run(args: Args) -> Result<()> {
             v
         };
         for platform in platforms.iter() {
+            // Every platform is selected and filtered on its own, and the
+            // results are merged: filtering the dependency kinds of one
+            // platform must not drop the packages of another one.
+            let mut platform_packages = HashMap::new();
             add_packages_for_platform(
                 &args,
                 &config,
                 &all_packages,
-                &mut packages,
+                &mut platform_packages,
                 Some(platform),
             )?;
-            dep_kinds_filtering::filter_dep_kinds(&args, &config, &mut packages, Some(platform))?;
+            dep_kinds_filtering::filter_dep_kinds(
+                &args,
+                &config,
+                &mut platform_packages,
+                Some(platform),
+            )?;
+            packages.extend(platform_packages);
         }
         expanded_platforms = Some(platforms);
     } else {
