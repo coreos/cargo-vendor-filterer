@@ -255,6 +255,12 @@ pub struct Args {
     #[arg(long)]
     pub versioned_dirs: bool,
 
+    /// Replace the output directory if it already exists. It is moved aside
+    /// while vendoring and only removed once vendoring has succeeded, so a
+    /// failure leaves it as it was.
+    #[arg(long)]
+    pub overwrite: bool,
+
     /// The output path
     pub path: Option<Utf8PathBuf>,
 
@@ -1008,6 +1014,61 @@ fn is_worth_reporting(key: &str, value: &toml::Value) -> bool {
     !(key == "build" && value.as_bool() == Some(false))
 }
 
+/// An existing output directory moved aside while it is replaced. Unless the
+/// replacement is committed, dropping this puts the directory back.
+struct SetAside {
+    path: Utf8PathBuf,
+    aside: Utf8PathBuf,
+    committed: bool,
+}
+
+impl SetAside {
+    /// Move `path` to a hidden sibling, e.g. `vendor` to `.vendor.pre-overwrite`.
+    fn new(path: &Utf8Path) -> Result<Self> {
+        let name = path
+            .file_name()
+            .with_context(|| format!("Cannot overwrite {path}"))?;
+        let aside = path.with_file_name(format!(".{name}.pre-overwrite"));
+        if aside.exists() {
+            anyhow::bail!("Refusing to overwrite {path}: {aside} is left over from an earlier run");
+        }
+        std::fs::rename(path, &aside).with_context(|| format!("Moving {path} to {aside}"))?;
+        Ok(Self {
+            path: path.to_owned(),
+            aside,
+            committed: false,
+        })
+    }
+
+    /// Remove the directory moved aside, as its replacement is complete.
+    fn commit(mut self) {
+        self.committed = true;
+        if let Err(e) = std::fs::remove_dir_all(&self.aside) {
+            eprintln!("warning: failed to remove {}: {e}", self.aside);
+        }
+    }
+}
+
+impl Drop for SetAside {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+        // Whatever was generated in its place is incomplete.
+        if let Err(e) = std::fs::remove_dir_all(&self.path) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("warning: failed to remove {}: {e}", self.path);
+            }
+        }
+        if let Err(e) = std::fs::rename(&self.aside, &self.path) {
+            eprintln!(
+                "error: failed to restore {} from {}: {e}",
+                self.path, self.aside
+            );
+        }
+    }
+}
+
 /// Deletes unreferenced packages from the vendor directory. Returns the
 /// directories of the packages replaced with a stub.
 fn delete_unreferenced_packages(
@@ -1110,8 +1171,10 @@ pub fn run(args: Args) -> Result<()> {
             _ => unreachable!(),
         });
 
-    if output_dir.exists() {
-        anyhow::bail!("Refusing to operate on extant directory: {}", output_dir);
+    if output_dir.exists() && !args.overwrite {
+        anyhow::bail!(
+            "Refusing to operate on extant directory: {output_dir} (use --overwrite to replace it)"
+        );
     }
 
     // We need to gather the full, unfiltered metadata to canonically know what
@@ -1167,6 +1230,15 @@ pub fn run(args: Args) -> Result<()> {
         add_packages_for_platform(&args, &config, &all_packages, &mut packages, None)?;
         dep_kinds_filtering::filter_dep_kinds(&args, &config, &mut packages, None)?;
     }
+
+    // With --overwrite, the existing output directory stays in place up to
+    // here, as cargo may have resolved the packages from it through a source
+    // replacement. It is only moved aside now, and put back on failure.
+    let set_aside = if output_dir.exists() {
+        Some(SetAside::new(&output_dir)?)
+    } else {
+        None
+    };
 
     // Run `cargo vendor` which will capture all dependencies.
     let manifest_path = args
@@ -1245,6 +1317,9 @@ pub fn run(args: Args) -> Result<()> {
         eprintln!("Wrote: {report_path}");
     }
 
+    if let Some(set_aside) = set_aside {
+        set_aside.commit();
+    }
     eprintln!("Generated: {final_output_path}");
     Ok(())
 }
