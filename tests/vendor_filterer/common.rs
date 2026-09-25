@@ -77,6 +77,7 @@ pub(crate) struct VendorOptions<'a, 'b, 'c, 'd, 'e, 'f, 'g> {
     pub keep_dep_kinds: Option<&'static str>,
     pub current_dir: Option<&'f Utf8Path>,
     pub json: Option<&'g Utf8Path>,
+    pub overwrite: bool,
 }
 
 /// Run a vendoring process
@@ -125,6 +126,9 @@ pub(crate) fn vendor(options: VendorOptions) -> Result<Output> {
     }
     if let Some(json) = options.json {
         cmd.arg(format!("--json={json}"));
+    }
+    if options.overwrite {
+        cmd.arg("--overwrite");
     }
 
     Ok({
