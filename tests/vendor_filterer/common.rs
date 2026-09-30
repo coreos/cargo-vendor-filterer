@@ -78,6 +78,9 @@ pub(crate) struct VendorOptions<'a, 'b, 'c, 'd, 'e, 'f, 'g> {
     pub current_dir: Option<&'f Utf8Path>,
     pub json: Option<&'g Utf8Path>,
     pub overwrite: bool,
+    pub packages: &'static [&'static str],
+    pub features: &'static [&'static str],
+    pub no_default_features: bool,
 }
 
 /// Run a vendoring process
@@ -117,6 +120,15 @@ pub(crate) fn vendor(options: VendorOptions) -> Result<Output> {
     }
     if let Some(keep_dep_kinds) = options.keep_dep_kinds {
         cmd.args(["--keep-dep-kinds", keep_dep_kinds]);
+    }
+    for package in options.packages {
+        cmd.args(["--package", package]);
+    }
+    for feature in options.features {
+        cmd.args(["--features", feature]);
+    }
+    if options.no_default_features {
+        cmd.arg("--no-default-features");
     }
     if let Some(output) = options.output {
         cmd.arg(output);
