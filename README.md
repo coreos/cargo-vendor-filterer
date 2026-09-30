@@ -69,6 +69,12 @@ key `workspace.metadata.vendor-filter`.
   to retain. An omitted key retains the historical package-catalog behavior;
   `features = []` instead opts into resolved-graph filtering with Cargo's default
   features. A nonempty list opts in and enables those features.
+- `packages`: Keep only crates reachable from these workspace packages, as
+  resolved by `cargo tree -p` for each platform. `features`,
+  `no-default-features` and `all-features` apply to every listed package,
+  except `member/feature` for a listed member, which applies to that member only.
+  For example, `packages = ["server", "operator"]` with `no-default-features = true`
+  and `features = ["openssl"]`. Cannot be combined with `--sync`.
 - `keep-dep-kinds`: Specify which dependencies kinds to keep.
   Can be one of: all, normal, build, dev, no-normal, no-build, no-dev
 - `exclude-crate-paths`: Remove files and directories from target crates.  A key
