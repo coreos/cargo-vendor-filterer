@@ -183,3 +183,48 @@ fn all_features_retains_all_feature_dependencies() {
     verify_crate_is_no_stub(&output_folder, "aws-lc-rs");
     verify_crate_is_no_stub(&output_folder, "ring");
 }
+
+#[test]
+fn several_features_with_dep_kind_filter() {
+    let (_td, test_folder) = tempdir().unwrap();
+    let manifest = write_file_create_parents(
+        &test_folder,
+        "Cargo.toml",
+        r#"
+        [package]
+        name = "several-features-dep-kinds-test"
+        version = "0.1.0"
+        edition = "2021"
+
+        [dependencies]
+        hex = { version = "0.4", optional = true }
+        memchr = { version = "2", optional = true }
+
+        [features]
+        hex = ["dep:hex"]
+        memchr = ["dep:memchr"]
+
+        [package.metadata.vendor-filter]
+        features = ["hex", "memchr"]
+        keep-dep-kinds = "no-dev"
+    "#,
+    )
+    .unwrap();
+    write_file_create_parents(&test_folder, "src/lib.rs", "").unwrap();
+
+    let output_folder = test_folder.join("vendor");
+    let output = vendor(VendorOptions {
+        output: Some(&output_folder),
+        manifest_path: Some(&manifest),
+        ..Default::default()
+    })
+    .unwrap();
+
+    assert!(
+        output.status.success(),
+        "vendor-filterer failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    verify_crate_is_no_stub(&output_folder, "hex");
+    verify_crate_is_no_stub(&output_folder, "memchr");
+}

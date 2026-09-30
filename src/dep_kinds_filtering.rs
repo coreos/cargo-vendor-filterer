@@ -123,7 +123,7 @@ fn get_required_packages<'a>(
             .as_ref()
             .filter(|features| !features.is_empty())
         {
-            cargo_tree.arg("--features").args(features);
+            cargo_tree.arg("--features").arg(features.join(","));
         }
         match platform {
             Some(platform) => cargo_tree.arg(format!("--target={platform}")),
