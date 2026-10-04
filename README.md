@@ -32,6 +32,10 @@ $ cargo vendor-filterer --tier=2
 
 Currently this will drop out crates such as `redox_syscall`.
 
+An existing output directory is left alone unless `--overwrite` is given, which
+replaces it. It is removed right before `cargo vendor` runs, so a project whose
+`.cargo/config.toml` points at it can still be vendored again.
+
 You can also declaratively specify the desired vendor configuration via the [Cargo metadata](https://doc.rust-lang.org/cargo/reference/manifest.html#the-metadata-table)
 key `package.metadata.vendor-filter`.  In this example, we include only tier 1 and 2 Linux platforms, and additionally remove some vendored C sources, `tests` folders
 and development dependencies from all crates:

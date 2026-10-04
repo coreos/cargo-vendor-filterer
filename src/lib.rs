@@ -255,6 +255,12 @@ pub struct Args {
     #[arg(long)]
     pub versioned_dirs: bool,
 
+    /// Replace the output directory if it already exists. It is removed right
+    /// before `cargo vendor` runs, so cargo can still read it while resolving
+    /// packages through a source replacement.
+    #[arg(long)]
+    pub overwrite: bool,
+
     /// The output path
     pub path: Option<Utf8PathBuf>,
 
@@ -1110,8 +1116,10 @@ pub fn run(args: Args) -> Result<()> {
             _ => unreachable!(),
         });
 
-    if output_dir.exists() {
-        anyhow::bail!("Refusing to operate on extant directory: {}", output_dir);
+    if output_dir.exists() && !args.overwrite {
+        anyhow::bail!(
+            "Refusing to operate on extant directory: {output_dir} (use --overwrite to replace it)"
+        );
     }
 
     // We need to gather the full, unfiltered metadata to canonically know what
@@ -1166,6 +1174,13 @@ pub fn run(args: Args) -> Result<()> {
     } else {
         add_packages_for_platform(&args, &config, &all_packages, &mut packages, None)?;
         dep_kinds_filtering::filter_dep_kinds(&args, &config, &mut packages, None)?;
+    }
+
+    // With --overwrite, the existing output directory stays in place up to
+    // here, as cargo may have resolved the packages from it through a source
+    // replacement.
+    if args.overwrite && output_dir.exists() {
+        std::fs::remove_dir_all(&*output_dir).with_context(|| format!("Removing {output_dir}"))?;
     }
 
     // Run `cargo vendor` which will capture all dependencies.
