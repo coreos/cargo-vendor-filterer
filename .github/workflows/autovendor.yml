@@ -15,7 +15,7 @@ jobs:
   vendor:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@v1
         with:
@@ -27,7 +27,7 @@ jobs:
         run: cargo install --path .
       - name: Run
         run: cargo vendor-filterer --format=tar.zstd
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v7
         with:
           name: vendor.tar.zstd
           path: vendor.tar.zstd
