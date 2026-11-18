@@ -66,7 +66,7 @@ fn overwrite_repeatedly() {
 
 #[test]
 fn default_output_folder() {
-    let mut root = project_root().unwrap();
+    let mut root = project_root().to_owned();
     root.push("vendor");
     if root.exists() {
         fs::remove_dir_all(&root).unwrap();
