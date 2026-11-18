@@ -79,6 +79,7 @@ pub(crate) fn filter_dep_kinds(
         &args.get_all_manifest_paths(),
         args.offline,
         config,
+        &[],
         platform,
     )?;
 
@@ -91,14 +92,45 @@ pub(crate) fn filter_dep_kinds(
     Ok(())
 }
 
-/// Returns the set of required packages to satisfy filters specified in config
+/// Packages to keep, identified by name and version as printed by `cargo tree`.
+pub(crate) type RequiredPackages<'a> =
+    HashSet<(Cow<'a, str>, Cow<'a, cargo_metadata::semver::Version>)>;
+
+/// Returns the packages reachable from the selected packages, on each platform.
+pub(crate) fn packages_for_selection(
+    args: &Args,
+    config: &VendorFilter,
+    platforms: Option<&[String]>,
+) -> Result<RequiredPackages<'static>> {
+    let manifest_paths = args.get_all_manifest_paths();
+    let platforms: Vec<Option<&str>> = match platforms {
+        Some(platforms) => platforms.iter().map(|p| Some(p.as_str())).collect(),
+        None => vec![None],
+    };
+    platforms
+        .into_iter()
+        .try_fold(RequiredPackages::new(), |mut required, platform| {
+            required.extend(get_required_packages(
+                &manifest_paths,
+                args.offline,
+                config,
+                &config.packages,
+                platform,
+            )?);
+            Ok(required)
+        })
+}
+
+/// Returns the set of required packages to satisfy filters specified in config,
+/// reachable from `packages` or, when empty, from every workspace member
 fn get_required_packages<'a>(
     manifest_paths: &[Option<&Utf8Path>],
     offline: bool,
     config: &VendorFilter,
+    packages: &[String],
     platform: Option<&str>,
-) -> Result<HashSet<(Cow<'a, str>, Cow<'a, cargo_metadata::semver::Version>)>> {
-    let keep_dep_kinds = config.keep_dep_kinds.expect("keep_dep_kinds not set");
+) -> Result<RequiredPackages<'a>> {
+    let keep_dep_kinds = config.keep_dep_kinds.unwrap_or(DepKinds::All);
     let mut required_packages = HashSet::new();
     for manifest_path in manifest_paths {
         let mut cargo_tree = std::process::Command::new("cargo");
@@ -112,6 +144,9 @@ fn get_required_packages<'a>(
         if let Some(manifest_path) = manifest_path {
             cargo_tree.args(["--manifest-path", manifest_path.as_str()]);
         }
+        for package in packages {
+            cargo_tree.args(["--package", package]);
+        }
         if config.all_features {
             cargo_tree.arg("--all-features");
         }
@@ -123,7 +158,7 @@ fn get_required_packages<'a>(
             .as_ref()
             .filter(|features| !features.is_empty())
         {
-            cargo_tree.arg("--features").args(features);
+            cargo_tree.arg("--features").arg(features.join(","));
         }
         match platform {
             Some(platform) => cargo_tree.arg(format!("--target={platform}")),
@@ -135,11 +170,12 @@ fn get_required_packages<'a>(
         let output = cargo_tree.output()?;
         if !output.status.success() {
             anyhow::bail!(
-                "Failed to execute cargo tree: {:?}",
-                String::from_utf8(output.stderr).expect("Invalid cargo tree output")
+                "Failed to execute cargo tree: {}",
+                String::from_utf8_lossy(&output.stderr)
             );
         }
-        let output_str = String::from_utf8(output.stdout).expect("Invalid cargo tree output");
+        let output_str =
+            String::from_utf8(output.stdout).context("cargo tree printed non-UTF-8 output")?;
         for line in output_str.lines() {
             if line.trim().is_empty() {
                 // `cargo tree` output from a `[workspace]` with multiple
@@ -182,6 +218,7 @@ mod tests {
             &[Some(&own_cargo_toml)],
             false,
             &serde_json::from_value(json!({ "keep-dep-kinds": "dev"})).unwrap(),
+            &[],
             Some("x86_64-pc-windows-gnu"),
         )
         .unwrap();
@@ -197,6 +234,7 @@ mod tests {
             false,
             &serde_json::from_value(json!({ "keep-dep-kinds": "all", "--all-features": true}))
                 .unwrap(),
+            &[],
             None, // all platforms
         )
         .unwrap();
@@ -212,6 +250,7 @@ mod tests {
             &[Some(&own_cargo_toml)],
             false,
             &serde_json::from_value(json!({ "keep-dep-kinds": "normal"})).unwrap(),
+            &[],
             Some("x86_64-pc-windows-gnu"),
         )
         .unwrap();
@@ -221,6 +260,7 @@ mod tests {
             &[Some(&own_cargo_toml)],
             false,
             &serde_json::from_value(json!({ "keep-dep-kinds": "no-build"})).unwrap(),
+            &[],
             Some("x86_64-pc-windows-gnu"),
         )
         .unwrap();
@@ -243,6 +283,7 @@ mod tests {
             &[Some(&own_cargo_toml)],
             false,
             &serde_json::from_value(json!({ "keep-dep-kinds": "build"})).unwrap(),
+            &[],
             Some("x86_64-unknown-linux-gnu"),
         )
         .unwrap();
@@ -252,6 +293,7 @@ mod tests {
             &[Some(&own_cargo_toml)],
             false,
             &serde_json::from_value(json!({ "keep-dep-kinds": "no-dev"})).unwrap(),
+            &[],
             Some("x86_64-unknown-linux-gnu"),
         )
         .unwrap();
