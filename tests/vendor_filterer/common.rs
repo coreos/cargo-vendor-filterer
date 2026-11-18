@@ -1,10 +1,8 @@
-use std::env;
 use std::fmt;
 use std::fs;
 use std::io;
 use std::process::{Command, Output};
 
-use anyhow::bail;
 use anyhow::Result;
 use camino;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -14,31 +12,8 @@ use cargo_vendor_filterer::{
 };
 
 // Return the project root
-pub(crate) fn project_root() -> Result<Utf8PathBuf> {
-    let mut path = build_root()?;
-    while path.exists() && path.is_dir() {
-        let found_lock_file = path
-            .read_dir_utf8()?
-            .filter_map(|e| e.ok())
-            .any(|e| e.file_name().eq("Cargo.lock"));
-        if found_lock_file {
-            return Ok(path);
-        }
-        if !path.pop() {
-            break;
-        }
-    }
-    bail!(io::Error::from(io::ErrorKind::NotFound))
-}
-
-// Return the root of the executable's build directory
-pub(crate) fn build_root() -> Result<Utf8PathBuf> {
-    let mut path: Utf8PathBuf = env::current_exe()?.try_into()?;
-    path.pop();
-    if path.ends_with("deps") {
-        path.pop();
-    }
-    Ok(path)
+pub(crate) fn project_root() -> &'static Utf8Path {
+    Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
 }
 
 #[derive(Clone, Copy)]
@@ -88,10 +63,8 @@ pub(crate) fn vendor(options: VendorOptions) -> Result<Output> {
     // excessive CPU usage.
     static LOCK: OnceCell<Mutex<()>> = OnceCell::new();
 
-    let mut program = build_root()?;
-    program.push(format!("cargo-{SELF_NAME}"));
-    let mut cmd = Command::new(&program);
-    cmd.current_dir(options.current_dir.unwrap_or(project_root()?.as_path()))
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_cargo-vendor-filterer"));
+    cmd.current_dir(options.current_dir.unwrap_or(project_root()))
         .arg(SELF_NAME);
     if let Some(platforms) = options.platforms {
         cmd.args(platforms.iter().map(|&p| format!("--platform={p}")));
